@@ -1,7 +1,9 @@
+use crate::utilities::*;
 use crate::*;
 use bevy::render::{
     render_graph::{Node, NodeRunError, RenderGraphContext},
     renderer::{RenderContext, RenderDevice, RenderQueue},
+    view::{ViewUniform, ViewUniforms},
 };
 use std::{borrow::Cow, mem::size_of};
 
@@ -17,11 +19,14 @@ impl Node for FlowFieldComputeNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let resources = world.resource::<FlowFieldComputeResources>();
-        let uniforms = world.resource::<FlowFieldUniforms>();
+        let settings = world.resource::<FlowFieldSettings>();
+        let bind_group = world.resource::<FlowFieldComputeBindGroup>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
-        let Some(compute_pipeline) = pipeline_cache.get_compute_pipeline(resources.pipeline_id)
-        else {
+        let (Some(compute_pipeline), Some(bind_group)) = (
+            pipeline_cache.get_compute_pipeline(resources.pipeline_id),
+            bind_group.0.clone(),
+        ) else {
             return Ok(());
         };
 
@@ -30,14 +35,14 @@ impl Node for FlowFieldComputeNode {
             label: Some("flow_field_compute_pass"),
         });
 
-        pass.set_bind_group(0, &resources.bind_group, &[]);
+        pass.set_bind_group(0, &bind_group, &[]);
         pass.set_pipeline(&compute_pipeline);
-        pass.dispatch_workgroups(uniforms.num_spawned_lines / WORK_GROUP_SIZE, 1, 1);
+        pass.dispatch_workgroups(settings.num_spawned_lines / WORK_GROUP_SIZE, 1, 1);
 
         let device = world.resource::<RenderDevice>();
         let queue = world.resource::<RenderQueue>();
-        // read_buffer_u32(&bind_group.index_buffer, device, queue);
-        // read_buffer_f32(&resources.vertex_buffer, device, queue);
+        read_buffer_u32(&bind_group.index_buffer, device, queue);
+        read_buffer_f32(&resources.vertex_buffer, device, queue);
 
         Ok(())
     }
@@ -53,20 +58,19 @@ impl FromWorld for FlowFieldComputeNode {
 pub struct FlowFieldComputeResources {
     pub pipeline_id: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
-    pub bind_group: BindGroup,
-    pub uniforms_buffer: UniformBuffer<FlowFieldUniforms>,
+    pub settings_buffer: UniformBuffer<FlowFieldSettings>,
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
 }
 
 impl FromWorld for FlowFieldComputeResources {
     fn from_world(world: &mut World) -> Self {
-        let uniforms = world.resource::<FlowFieldUniforms>();
+        let uniforms = world.resource::<FlowFieldSettings>();
         let render_device = world.resource::<RenderDevice>();
         let render_queue = world.resource::<RenderQueue>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
-        let uniforms_buffer = uniforms.to_buffer(render_device, render_queue);
+        let settings_buffer = uniforms.to_buffer(render_device, render_queue);
 
         let vertex_buffer = render_device.create_buffer(&BufferDescriptor {
             label: Some("compute_vertex_buffer"),
@@ -94,9 +98,20 @@ impl FromWorld for FlowFieldComputeResources {
             render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: None,
                 entries: &[
-                    // Settings
+                    // View
                     BindGroupLayoutEntry {
                         binding: 0,
+                        visibility: ShaderStages::COMPUTE,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: Some(ViewUniform::min_size()),
+                        },
+                        count: None,
+                    },
+                    // Settings
+                    BindGroupLayoutEntry {
+                        binding: 1,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
@@ -107,7 +122,7 @@ impl FromWorld for FlowFieldComputeResources {
                     },
                     // Vertex buffer
                     BindGroupLayoutEntry {
-                        binding: 1,
+                        binding: 2,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Storage { read_only: false },
@@ -118,7 +133,7 @@ impl FromWorld for FlowFieldComputeResources {
                     },
                     // Index buffer
                     BindGroupLayoutEntry {
-                        binding: 2,
+                        binding: 3,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Storage { read_only: false },
@@ -129,27 +144,6 @@ impl FromWorld for FlowFieldComputeResources {
                     },
                 ],
             });
-
-        let entries = &[
-            BindGroupEntry {
-                binding: 0,
-                resource: uniforms_buffer.binding().unwrap(),
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: vertex_buffer.as_entire_binding(),
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: index_buffer.as_entire_binding(),
-            },
-        ];
-
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            label: Some("flow_field_bind_group"),
-            layout: &bind_group_layout,
-            entries,
-        });
 
         let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: None,
@@ -163,10 +157,46 @@ impl FromWorld for FlowFieldComputeResources {
         Self {
             pipeline_id,
             bind_group_layout,
-            bind_group,
-            uniforms_buffer,
+            settings_buffer,
             vertex_buffer,
             index_buffer,
         }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct FlowFieldComputeBindGroup(pub Option<BindGroup>);
+
+pub fn queue_compute_bind_group(
+    mut compute_bind_group: ResMut<FlowFieldComputeBindGroup>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+    compute_resources: Res<FlowFieldComputeResources>,
+    view_uniforms: Res<ViewUniforms>,
+    settings: Res<FlowFieldSettings>,
+) {
+    if let Some(view_uniforms) = view_uniforms.uniforms.binding() {
+        let entries = &[
+            BindGroupEntry {
+                binding: 0,
+                resource: compute_resources.settings_buffer.binding().unwrap(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: compute_resources.vertex_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: compute_resources.index_buffer.as_entire_binding(),
+            },
+        ];
+
+        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
+            label: Some("flow_field_bind_group"),
+            layout: &compute_resources.bind_group_layout,
+            entries,
+        });
+
+        *compute_bind_group = FlowFieldComputeBindGroup(Some(bind_group));
     }
 }

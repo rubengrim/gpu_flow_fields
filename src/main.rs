@@ -1,26 +1,18 @@
 use bevy::{
     asset::load_internal_asset,
-    core_pipeline::*,
+    core_pipeline::{core_2d, tonemapping::Tonemapping},
     prelude::*,
     reflect::TypeUuid,
     render::{
         camera::CameraRenderGraph,
-        extract_resource::{ExtractResource, ExtractResourcePlugin},
-        render_asset::RenderAssets,
-        render_graph::{
-            Node, NodeRunError, RenderGraph, RenderGraphApp, RenderGraphContext, ViewNode,
-            ViewNodeRunner,
-        },
+        extract_resource::ExtractResource,
+        render_graph::{RenderGraphApp, ViewNodeRunner},
         render_resource::*,
-        renderer::{RenderContext, RenderDevice, RenderQueue},
+        renderer::{RenderDevice, RenderQueue},
+        view::ColorGrading,
         Render, RenderApp, RenderSet,
     },
-    utils::Uuid,
-    window::WindowPlugin,
 };
-use std::mem::size_of;
-use std::num::NonZeroU64;
-use std::ops::Deref;
 
 mod compute;
 mod render;
@@ -28,7 +20,6 @@ mod utilities;
 
 use compute::*;
 use render::*;
-use utilities::*;
 
 const FLOW_FIELD_RENDER_GRAPH: &str = "flow_field_graph";
 
@@ -47,6 +38,10 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
+    // commands.spawn(Camera2dBundle {
+    //     camera_render_graph: CameraRenderGraph::new(FLOW_FIELD_RENDER_GRAPH),
+    //     ..default()
+    // });
     commands.spawn(Camera2dBundle::default());
 }
 
@@ -71,16 +66,17 @@ impl Plugin for FlowFieldPlugin {
     fn finish(&self, app: &mut App) {
         // app.init_resource::<FlowFieldUniforms>();
 
-        app.sub_app_mut(RenderApp)
-            .init_resource::<FlowFieldUniforms>()
-            .init_resource::<FlowFieldComputeResources>()
-            .init_resource::<FlowFieldRenderResources>();
-
-        // app.add_plugins(ExtractResourcePlugin::<FlowFieldUniforms>::default());
-
         let render_app = app.sub_app_mut(RenderApp);
         render_app
-            // .add_render_sub_graph(FLOW_FIELD_RENDER_GRAPH)
+            .init_resource::<FlowFieldSettings>()
+            .init_resource::<FlowFieldComputeResources>()
+            .init_resource::<FlowFieldComputeBindGroup>()
+            .init_resource::<FlowFieldRenderResources>()
+            .init_resource::<FlowFieldRenderBindGroup>();
+
+        render_app.add_systems(Render, queue_render_bind_group.in_set(RenderSet::Queue));
+
+        render_app
             .add_render_graph_node::<FlowFieldComputeNode>(
                 core_2d::graph::NAME,
                 "flow_field_compute_node",
@@ -92,16 +88,47 @@ impl Plugin for FlowFieldPlugin {
         render_app.add_render_graph_edges(
             core_2d::graph::NAME,
             &[
+                core_2d::graph::node::MAIN_PASS,
                 "flow_field_compute_node",
                 "flow_field_render_node",
-                core_2d::graph::node::MSAA_WRITEBACK,
+                core_2d::graph::node::BLOOM,
             ],
         );
     }
 }
 
+#[derive(Component, Default)]
+pub struct FlowFieldCameraLabel;
+
+#[derive(Bundle)]
+pub struct FlowFieldCameraBundle {
+    pub label: FlowFieldCameraLabel,
+    pub camera: Camera,
+    pub camera_render_graph: CameraRenderGraph,
+    pub projection: Projection,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub tonemapping: Tonemapping,
+    pub color_grading: ColorGrading,
+}
+
+impl Default for FlowFieldCameraBundle {
+    fn default() -> Self {
+        Self {
+            label: Default::default(),
+            camera: Default::default(),
+            camera_render_graph: CameraRenderGraph::new(FLOW_FIELD_RENDER_GRAPH),
+            projection: Default::default(),
+            transform: Default::default(),
+            global_transform: Default::default(),
+            tonemapping: Default::default(),
+            color_grading: Default::default(),
+        }
+    }
+}
+
 #[derive(Resource, ExtractResource, ShaderType, Clone, Copy)]
-pub struct FlowFieldUniforms {
+pub struct FlowFieldSettings {
     pub num_spawned_lines: u32,
     pub max_iterations: u32,
     pub current_iteration: u32,
@@ -109,7 +136,7 @@ pub struct FlowFieldUniforms {
     pub viewport_height: f32,
 }
 
-impl Default for FlowFieldUniforms {
+impl Default for FlowFieldSettings {
     fn default() -> Self {
         Self {
             num_spawned_lines: 1,
@@ -121,14 +148,14 @@ impl Default for FlowFieldUniforms {
     }
 }
 
-impl FlowFieldUniforms {
+impl FlowFieldSettings {
     fn to_buffer(
         &self,
         render_device: &RenderDevice,
         render_queue: &RenderQueue,
-    ) -> UniformBuffer<FlowFieldUniforms> {
+    ) -> UniformBuffer<FlowFieldSettings> {
         let mut buffer = UniformBuffer::from(*self);
-        buffer.set_label(Some("flow_field_uniforms"));
+        buffer.set_label(Some("flow_field_settings"));
         buffer.write_buffer(render_device, render_queue);
         buffer
     }
