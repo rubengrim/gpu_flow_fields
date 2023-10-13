@@ -40,6 +40,13 @@ struct LineVertex {
     color: vec4<f32>,
 }
 
+// fn create_vertex_pos_for_line_joint(previous_joint_pos: vec2<f32>, current_joint_pos: vec2<f32>, line_width: f32) -> (LineVertex, LineVertex) {
+//     let line_tangent = current_joint_pos - previous_joint_pos;
+//     let line_normal = normalize(vec2<f32>(line_tangent.y, -line_tangent.x));
+    
+    
+// }
+
 @compute @workgroup_size(1, 1, 1)
 fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
     // Create an initial line segment of 4 vertices.
@@ -47,7 +54,7 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
 
     let line_width = 30.0;
     let step_size = 60.0;
-    let flow_field_direction = vec2<f32>(1.0, 1.0);
+    let flow_field_direction = vec2<f32>(1.0, -1.0);
 
     // Multiplying by two ensures there's room for exactly two unique seeds per invocation
     let seed_1 = invocation_id.x * 2u; 
@@ -62,36 +69,46 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     let first_triangle_index = 6u * invocation_id.x;
 
     let line_tangent = second_line_position - first_line_position;
-    let line_normal = normalize(vec2<f32>(-line_tangent.y, line_tangent.x));
+    let line_normal = normalize(vec2<f32>(line_tangent.y, -line_tangent.x));
     
-    // Defined in counter clockwise order
-    // let position_1 = first_line_position - line_normal * line_width / 2.0;
-    // let position_2 = first_line_position + line_normal * line_width / 2.0;
-    // let position_3 = second_line_position - line_normal * line_width / 2.0;
-    // let position_4 = second_line_position + line_normal * line_width / 2.0;
+    let position_1 = first_line_position - line_normal * line_width / 2.0;
+    let position_2 = first_line_position + line_normal * line_width / 2.0;
+    let position_3 = second_line_position - line_normal * line_width / 2.0;
+    let position_4 = second_line_position + line_normal * line_width / 2.0;
 
-    let position_1 = vec2<f32>(0.0, 0.0);
-    let position_2 = vec2<f32>(50.0, 0.0);
-    let position_3 = vec2<f32>(50.0, 25.0);
-    let position_4 = vec2<f32>(0.0, 25.0);
+    // let position_1 = vec2<f32>(0.0, 0.0);
+    // let position_2 = vec2<f32>(50.0, 0.0);
+    // let position_3 = vec2<f32>(50.0, 25.0);
+    // let position_4 = vec2<f32>(0.0, 25.0);
 
-    let color = vec3<f32>(1.0, 1.0, 1.0);
-    let vertex_1 = LineVertex(vec4<f32>(position_1, 0.0, 0.0), vec4<f32>(color, 0.0));
-    let vertex_2 = LineVertex(vec4<f32>(position_2, 0.0, 0.0), vec4<f32>(color, 0.0));
-    let vertex_3 = LineVertex(vec4<f32>(position_3, 0.0, 0.0), vec4<f32>(color, 0.0));
-    let vertex_4 = LineVertex(vec4<f32>(position_4, 0.0, 0.0), vec4<f32>(color, 0.0));
+    let color_1 = vec3<f32>(1.0, 0.0, 0.0);
+    let color_2 = vec3<f32>(0.0, 1.0, 0.0);
+    let color_3 = vec3<f32>(0.0, 0.0, 1.0);
+    let color_4 = vec3<f32>(0.0, 0.0, 0.0);
+
+    let vertex_1 = LineVertex(vec4<f32>(position_1, 0.0, 0.0), vec4<f32>(color_1, 0.0));
+    let vertex_2 = LineVertex(vec4<f32>(position_2, 0.0, 0.0), vec4<f32>(color_2, 0.0));
+    let vertex_3 = LineVertex(vec4<f32>(position_3, 0.0, 0.0), vec4<f32>(color_3, 0.0));
+    let vertex_4 = LineVertex(vec4<f32>(position_4, 0.0, 0.0), vec4<f32>(color_4, 0.0));
 
     vertex_buffer[first_vertex_index] = vertex_1;
     vertex_buffer[first_vertex_index+1u] = vertex_2;
     vertex_buffer[first_vertex_index+2u] = vertex_3;
     vertex_buffer[first_vertex_index+3u] = vertex_4;
     
+    // index_buffer[first_triangle_index] = first_vertex_index+3u;
+    // index_buffer[first_triangle_index+1u] = first_vertex_index+1u;
+    // index_buffer[first_triangle_index+2u] = first_vertex_index;
+    // index_buffer[first_triangle_index+3u] = first_vertex_index+2u;
+    // index_buffer[first_triangle_index+4u] = first_vertex_index+3u;
+    // index_buffer[first_triangle_index+5u] = first_vertex_index;
+
     index_buffer[first_triangle_index] = first_vertex_index;
     index_buffer[first_triangle_index+1u] = first_vertex_index+1u;
-    index_buffer[first_triangle_index+2u] = first_vertex_index+2u;
-    index_buffer[first_triangle_index+3u] = first_vertex_index+2u;
+    index_buffer[first_triangle_index+2u] = first_vertex_index+3u;
+    index_buffer[first_triangle_index+3u] = first_vertex_index;
     index_buffer[first_triangle_index+4u] = first_vertex_index+3u;
-    index_buffer[first_triangle_index+5u] = first_vertex_index;
+    index_buffer[first_triangle_index+5u] = first_vertex_index+2u;
 }
 
 @compute @workgroup_size(8, 1, 1)

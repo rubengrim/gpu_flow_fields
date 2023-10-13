@@ -1,30 +1,36 @@
 use crate::utilities::*;
 use crate::*;
-use bevy::render::{
-    render_graph::{Node, NodeRunError, RenderGraphContext},
-    renderer::{RenderContext, RenderDevice, RenderQueue},
-    view::{ViewUniform, ViewUniforms},
+use bevy::{
+    ecs::query::QueryItem,
+    render::{
+        render_graph::{NodeRunError, RenderGraphContext, ViewNode},
+        renderer::{RenderContext, RenderDevice, RenderQueue},
+        view::{ViewUniform, ViewUniformOffset, ViewUniforms},
+    },
 };
 use std::{borrow::Cow, mem::size_of};
 
 pub struct FlowFieldComputeNode;
 
-impl Node for FlowFieldComputeNode {
+impl ViewNode for FlowFieldComputeNode {
+    type ViewQuery = &'static ViewUniformOffset;
+
     fn update(&mut self, _world: &mut World) {}
 
     fn run(
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext,
+        view_uniform_offset: QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let resources = world.resource::<FlowFieldComputeResources>();
+        let compute_resources = world.resource::<FlowFieldComputeResources>();
         let settings = world.resource::<FlowFieldSettings>();
         let bind_group = world.resource::<FlowFieldComputeBindGroup>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let (Some(compute_pipeline), Some(bind_group)) = (
-            pipeline_cache.get_compute_pipeline(resources.pipeline_id),
+            pipeline_cache.get_compute_pipeline(compute_resources.pipeline_id),
             bind_group.0.clone(),
         ) else {
             return Ok(());
@@ -35,14 +41,14 @@ impl Node for FlowFieldComputeNode {
             label: Some("flow_field_compute_pass"),
         });
 
-        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
         pass.set_pipeline(&compute_pipeline);
         pass.dispatch_workgroups(settings.num_spawned_lines / WORK_GROUP_SIZE, 1, 1);
 
         let device = world.resource::<RenderDevice>();
         let queue = world.resource::<RenderQueue>();
-        read_buffer_u32(&bind_group.index_buffer, device, queue);
-        read_buffer_f32(&resources.vertex_buffer, device, queue);
+        // read_buffer_u32(&compute_resources.index_buffer, device, queue);
+        // read_buffer_f32(&compute_resources.vertex_buffer, device, queue);
 
         Ok(())
     }
@@ -179,14 +185,18 @@ pub fn queue_compute_bind_group(
         let entries = &[
             BindGroupEntry {
                 binding: 0,
-                resource: compute_resources.settings_buffer.binding().unwrap(),
+                resource: view_uniforms.clone(),
             },
             BindGroupEntry {
                 binding: 1,
-                resource: compute_resources.vertex_buffer.as_entire_binding(),
+                resource: compute_resources.settings_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 2,
+                resource: compute_resources.vertex_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 3,
                 resource: compute_resources.index_buffer.as_entire_binding(),
             },
         ];

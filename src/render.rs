@@ -98,7 +98,7 @@ impl ViewNode for FlowFieldRenderNode {
                 view: view_target.main_texture_view(),
                 resolve_target: None,
                 ops: Operations {
-                    load: LoadOp::Clear(wgpu::Color::RED),
+                    load: LoadOp::Clear(wgpu::Color::WHITE),
                     store: true,
                 },
             })],
@@ -196,7 +196,7 @@ impl FromWorld for FlowFieldRenderResources {
                 topology: PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
-                cull_mode: None,
+                cull_mode: Some(Face::Back),
                 unclipped_depth: false,
                 polygon_mode: PolygonMode::Fill,
                 conservative: false,

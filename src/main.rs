@@ -74,10 +74,13 @@ impl Plugin for FlowFieldPlugin {
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
-        render_app.add_systems(Render, queue_render_bind_group.in_set(RenderSet::Queue));
+        render_app.add_systems(
+            Render,
+            (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
+        );
 
         render_app
-            .add_render_graph_node::<FlowFieldComputeNode>(
+            .add_render_graph_node::<ViewNodeRunner<FlowFieldComputeNode>>(
                 core_2d::graph::NAME,
                 "flow_field_compute_node",
             )
