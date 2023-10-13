@@ -89,8 +89,8 @@ impl ViewNode for FlowFieldRenderNode {
         let queue = world.resource::<RenderQueue>();
         queue.submit([encoder.finish()]);
 
-        // read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
-        // read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
+        read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
+        read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
 
         let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: None,
@@ -196,7 +196,8 @@ impl FromWorld for FlowFieldRenderResources {
                 topology: PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: FrontFace::Ccw,
-                cull_mode: Some(Face::Back),
+                // cull_mode: Some(Face::Back),
+                cull_mode: None,
                 unclipped_depth: false,
                 polygon_mode: PolygonMode::Fill,
                 conservative: false,
