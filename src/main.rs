@@ -68,7 +68,7 @@ impl Plugin for FlowFieldPlugin {
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
-            .init_resource::<FlowFieldSettings>()
+            .init_resource::<FlowFieldGlobals>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
             .init_resource::<FlowFieldRenderResources>()
@@ -131,34 +131,32 @@ impl Default for FlowFieldCameraBundle {
 }
 
 #[derive(Resource, ExtractResource, ShaderType, Clone, Copy)]
-pub struct FlowFieldSettings {
+pub struct FlowFieldGlobals {
     pub num_spawned_lines: u32,
     pub max_iterations: u32,
     pub current_iteration: u32,
-    pub viewport_width: f32,
-    pub viewport_height: f32,
+    pub line_width: f32,
 }
 
-impl Default for FlowFieldSettings {
+impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
             num_spawned_lines: 1,
-            max_iterations: 1,
+            max_iterations: 10,
             current_iteration: 0,
-            viewport_width: 1280.0,
-            viewport_height: 720.0,
+            line_width: 10.0,
         }
     }
 }
 
-impl FlowFieldSettings {
+impl FlowFieldGlobals {
     fn to_buffer(
         &self,
         render_device: &RenderDevice,
         render_queue: &RenderQueue,
-    ) -> UniformBuffer<FlowFieldSettings> {
+    ) -> UniformBuffer<FlowFieldGlobals> {
         let mut buffer = UniformBuffer::from(*self);
-        buffer.set_label(Some("flow_field_settings"));
+        buffer.set_label(Some("flow_field_globals"));
         buffer.write_buffer(render_device, render_queue);
         buffer
     }

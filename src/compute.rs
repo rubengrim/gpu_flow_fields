@@ -10,12 +10,51 @@ use bevy::{
 };
 use std::{borrow::Cow, mem::size_of};
 
-pub struct FlowFieldComputeNode;
+pub enum FlowFieldComputeNodeState {
+    Loading,
+    Init,
+    Update,
+    Finished,
+}
+
+pub struct FlowFieldComputeNode(pub FlowFieldComputeNodeState);
 
 impl ViewNode for FlowFieldComputeNode {
     type ViewQuery = &'static ViewUniformOffset;
 
-    fn update(&mut self, _world: &mut World) {}
+    fn update(&mut self, world: &mut World) {
+        world.resource_scope(|world, mut globals: Mut<FlowFieldGlobals>| {
+            let pipeline_cache = world.resource::<PipelineCache>();
+            let compute_resources = world.resource::<FlowFieldComputeResources>();
+
+            match self.0 {
+                FlowFieldComputeNodeState::Loading => {
+                    if let CachedPipelineState::Ok(_) = pipeline_cache
+                        .get_compute_pipeline_state(compute_resources.init_pipeline_id)
+                    {
+                        self.0 = FlowFieldComputeNodeState::Init;
+                    }
+                }
+                FlowFieldComputeNodeState::Init => {
+                    if let CachedPipelineState::Ok(_) = pipeline_cache
+                        .get_compute_pipeline_state(compute_resources.update_pipeline_id)
+                    {
+                        // Init performs the equivalence of 2 iterations
+                        globals.current_iteration = 2;
+                        self.0 = FlowFieldComputeNodeState::Update;
+                    }
+                }
+                FlowFieldComputeNodeState::Update => {
+                    if globals.current_iteration > globals.max_iterations {
+                        self.0 = FlowFieldComputeNodeState::Finished;
+                    } else {
+                        globals.current_iteration += 1;
+                    }
+                }
+                FlowFieldComputeNodeState::Finished => {}
+            }
+        });
+    }
 
     fn run(
         &self,
@@ -25,12 +64,22 @@ impl ViewNode for FlowFieldComputeNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let compute_resources = world.resource::<FlowFieldComputeResources>();
-        let settings = world.resource::<FlowFieldSettings>();
+        let globals = world.resource::<FlowFieldGlobals>();
+        info!("Current iteration: {}", globals.current_iteration);
         let bind_group = world.resource::<FlowFieldComputeBindGroup>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
-        let (Some(compute_pipeline), Some(bind_group)) = (
-            pipeline_cache.get_compute_pipeline(compute_resources.pipeline_id),
+        let (Some(pipeline), Some(bind_group)) = (
+            match self.0 {
+                FlowFieldComputeNodeState::Loading => None,
+                FlowFieldComputeNodeState::Init => {
+                    pipeline_cache.get_compute_pipeline(compute_resources.init_pipeline_id)
+                }
+                FlowFieldComputeNodeState::Update => {
+                    pipeline_cache.get_compute_pipeline(compute_resources.update_pipeline_id)
+                }
+                FlowFieldComputeNodeState::Finished => None,
+            },
             bind_group.0.clone(),
         ) else {
             return Ok(());
@@ -42,8 +91,8 @@ impl ViewNode for FlowFieldComputeNode {
         });
 
         pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
-        pass.set_pipeline(&compute_pipeline);
-        pass.dispatch_workgroups(settings.num_spawned_lines / WORK_GROUP_SIZE, 1, 1);
+        pass.set_pipeline(&pipeline);
+        pass.dispatch_workgroups(globals.num_spawned_lines / WORK_GROUP_SIZE, 1, 1);
 
         let device = world.resource::<RenderDevice>();
         let queue = world.resource::<RenderQueue>();
@@ -56,22 +105,23 @@ impl ViewNode for FlowFieldComputeNode {
 
 impl FromWorld for FlowFieldComputeNode {
     fn from_world(_world: &mut World) -> Self {
-        Self
+        Self(FlowFieldComputeNodeState::Loading)
     }
 }
 
 #[derive(Resource)]
 pub struct FlowFieldComputeResources {
-    pub pipeline_id: CachedComputePipelineId,
+    pub init_pipeline_id: CachedComputePipelineId,
+    pub update_pipeline_id: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
-    pub settings_buffer: UniformBuffer<FlowFieldSettings>,
+    pub settings_buffer: UniformBuffer<FlowFieldGlobals>,
     pub vertex_buffer: Buffer,
     pub index_buffer: Buffer,
 }
 
 impl FromWorld for FlowFieldComputeResources {
     fn from_world(world: &mut World) -> Self {
-        let uniforms = world.resource::<FlowFieldSettings>();
+        let uniforms = world.resource::<FlowFieldGlobals>();
         let render_device = world.resource::<RenderDevice>();
         let render_queue = world.resource::<RenderQueue>();
         let pipeline_cache = world.resource::<PipelineCache>();
@@ -151,8 +201,17 @@ impl FromWorld for FlowFieldComputeResources {
                 ],
             });
 
-        let pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: None,
+        let init_pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::from("flow_field_init_pipeline")),
+            layout: vec![bind_group_layout.clone()],
+            push_constant_ranges: vec![],
+            shader: FLOW_FIELD_COMPUTE_SHADER.typed(),
+            shader_defs: vec![],
+            entry_point: Cow::from("init"),
+        });
+
+        let update_pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::from("flow_field_update_pipeline")),
             layout: vec![bind_group_layout.clone()],
             push_constant_ranges: vec![],
             shader: FLOW_FIELD_COMPUTE_SHADER.typed(),
@@ -161,7 +220,8 @@ impl FromWorld for FlowFieldComputeResources {
         });
 
         Self {
-            pipeline_id,
+            init_pipeline_id,
+            update_pipeline_id,
             bind_group_layout,
             settings_buffer,
             vertex_buffer,
@@ -179,7 +239,7 @@ pub fn queue_compute_bind_group(
     render_queue: Res<RenderQueue>,
     compute_resources: Res<FlowFieldComputeResources>,
     view_uniforms: Res<ViewUniforms>,
-    settings: Res<FlowFieldSettings>,
+    settings: Res<FlowFieldGlobals>,
 ) {
     if let Some(view_uniforms) = view_uniforms.uniforms.binding() {
         let entries = &[

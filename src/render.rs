@@ -17,7 +17,7 @@ use wgpu::{
 };
 
 use crate::{
-    compute::FlowFieldComputeResources, utilities::*, FlowFieldSettings, FLOW_FIELD_RENDER_SHADER,
+    compute::FlowFieldComputeResources, utilities::*, FlowFieldGlobals, FLOW_FIELD_RENDER_SHADER,
 };
 
 pub struct FlowFieldRenderNode;
@@ -34,7 +34,7 @@ impl ViewNode for FlowFieldRenderNode {
         (view_target, view_uniform_offset): QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let uniforms = world.resource::<FlowFieldSettings>();
+        let globals = world.resource::<FlowFieldGlobals>();
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let render_resources = world.resource::<FlowFieldRenderResources>();
         let bind_group = world.resource::<FlowFieldRenderBindGroup>();
@@ -51,12 +51,16 @@ impl ViewNode for FlowFieldRenderNode {
             .render_device()
             .create_buffer(&BufferDescriptor {
                 label: Some("vertex_buffer"),
-                size: (size_of::<f32>() as u32 * 16 * uniforms.num_spawned_lines * 2).into(),
+                size: (size_of::<f32>() as u32
+                    * 16
+                    * globals.num_spawned_lines
+                    * (globals.current_iteration + 1))
+                    .into(),
                 usage: BufferUsages::VERTEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
 
-        let num_indices = 6 * uniforms.num_spawned_lines;
+        let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration + 1);
         let index_buffer = render_context
             .render_device()
             .create_buffer(&BufferDescriptor {
@@ -89,8 +93,8 @@ impl ViewNode for FlowFieldRenderNode {
         let queue = world.resource::<RenderQueue>();
         queue.submit([encoder.finish()]);
 
-        read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
-        read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
+        // read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
+        // read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
 
         let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: None,
@@ -236,7 +240,7 @@ pub fn queue_render_bind_group(
     render_queue: Res<RenderQueue>,
     render_resources: Res<FlowFieldRenderResources>,
     view_uniforms: Res<ViewUniforms>,
-    settings: Res<FlowFieldSettings>,
+    settings: Res<FlowFieldGlobals>,
 ) {
     if let Some(view_uniforms) = view_uniforms.uniforms.binding() {
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
