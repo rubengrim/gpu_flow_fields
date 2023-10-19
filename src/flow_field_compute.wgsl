@@ -143,13 +143,18 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let new_joint = vec2<f32>(prev_joint.x + field_direction.x * step_size, prev_joint.y + field_direction.y * step_size);
     let new_joint_vertices = create_vertices_for_line_joint(new_joint, field_direction, line_width);
 
+
     vertex_buffer[base_vertex_index] = new_joint_vertices.first;
     vertex_buffer[base_vertex_index+1u] = new_joint_vertices.second;
     
-    index_buffer[base_triangle_index] = base_vertex_index-u32(2);
+    index_buffer[base_triangle_index] = base_vertex_index-u32(2u);
     index_buffer[base_triangle_index+1u] = base_vertex_index-u32(1u);
     index_buffer[base_triangle_index+2u] = base_vertex_index+u32(1u);
     index_buffer[base_triangle_index+3u] = base_vertex_index-u32(2u);
     index_buffer[base_triangle_index+4u] = base_vertex_index+u32(1u);
     index_buffer[base_triangle_index+5u] = base_vertex_index;
+
+    // // Debug
+    // index_buffer[0] = u32(globals.current_iteration);
+
 }

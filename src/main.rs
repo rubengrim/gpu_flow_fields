@@ -142,7 +142,7 @@ impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
             num_spawned_lines: 1,
-            max_iterations: 10,
+            max_iterations: 4,
             current_iteration: 0,
             line_width: 10.0,
         }
