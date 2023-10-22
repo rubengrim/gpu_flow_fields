@@ -69,6 +69,7 @@ impl Plugin for FlowFieldPlugin {
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .init_resource::<FlowFieldGlobals>()
+            .init_resource::<FlowFieldComputeState>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
             .init_resource::<FlowFieldRenderResources>()

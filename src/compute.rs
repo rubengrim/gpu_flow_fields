@@ -10,51 +10,12 @@ use bevy::{
 };
 use std::{borrow::Cow, mem::size_of};
 
-pub enum FlowFieldComputeNodeState {
-    Loading,
-    Init,
-    Update,
-    Finished,
-}
-
-pub struct FlowFieldComputeNode(pub FlowFieldComputeNodeState);
+pub struct FlowFieldComputeNode;
 
 impl ViewNode for FlowFieldComputeNode {
     type ViewQuery = &'static ViewUniformOffset;
 
-    fn update(&mut self, world: &mut World) {
-        world.resource_scope(|world, mut globals: Mut<FlowFieldGlobals>| {
-            let pipeline_cache = world.resource::<PipelineCache>();
-            let compute_resources = world.resource::<FlowFieldComputeResources>();
-
-            match self.0 {
-                FlowFieldComputeNodeState::Loading => {
-                    if let CachedPipelineState::Ok(_) = pipeline_cache
-                        .get_compute_pipeline_state(compute_resources.init_pipeline_id)
-                    {
-                        self.0 = FlowFieldComputeNodeState::Init;
-                    }
-                }
-                FlowFieldComputeNodeState::Init => {
-                    if let CachedPipelineState::Ok(_) = pipeline_cache
-                        .get_compute_pipeline_state(compute_resources.update_pipeline_id)
-                    {
-                        // Init performs the equivalence of 2 iterations
-                        globals.current_iteration = 2;
-                        self.0 = FlowFieldComputeNodeState::Update;
-                    }
-                }
-                FlowFieldComputeNodeState::Update => {
-                    if globals.current_iteration >= globals.max_iterations {
-                        self.0 = FlowFieldComputeNodeState::Finished;
-                    } else {
-                        globals.current_iteration += 1;
-                    }
-                }
-                FlowFieldComputeNodeState::Finished => {}
-            }
-        });
-    }
+    fn update(&mut self, world: &mut World) {}
 
     fn run(
         &self,
@@ -65,20 +26,23 @@ impl ViewNode for FlowFieldComputeNode {
     ) -> Result<(), NodeRunError> {
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let globals = world.resource::<FlowFieldGlobals>();
+        let state = world.resource::<FlowFieldComputeState>();
         // info!("Current iteration: {}", globals.current_iteration);
         let bind_group = world.resource::<FlowFieldComputeBindGroup>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let (Some(pipeline), Some(bind_group)) = (
-            match self.0 {
-                FlowFieldComputeNodeState::Loading => None,
-                FlowFieldComputeNodeState::Init => {
+            match *state {
+                FlowFieldComputeState::Loading => {info!("Loading"); None},
+                FlowFieldComputeState::Init => {
+                    info!("Init");
                     pipeline_cache.get_compute_pipeline(compute_resources.init_pipeline_id)
                 }
-                FlowFieldComputeNodeState::Update => {
+                FlowFieldComputeState::Update => {
+                    info!("Update");
                     pipeline_cache.get_compute_pipeline(compute_resources.update_pipeline_id)
                 }
-                FlowFieldComputeNodeState::Finished => None,
+                FlowFieldComputeState::Finished => {info!("Finished"); None},
             },
             bind_group.0.clone(),
         ) else {
@@ -105,7 +69,7 @@ impl ViewNode for FlowFieldComputeNode {
 
 impl FromWorld for FlowFieldComputeNode {
     fn from_world(_world: &mut World) -> Self {
-        Self(FlowFieldComputeNodeState::Loading)
+        Self
     }
 }
 
@@ -228,6 +192,49 @@ impl FromWorld for FlowFieldComputeResources {
             index_buffer,
         }
     }
+}
+
+#[derive(Resource, Default)]
+pub enum FlowFieldComputeState {
+    #[default]
+    Loading,
+    Init,
+    Update,
+    Finished,
+}
+
+pub fn update_compute_state(
+    pipeline_cache: Res<PipelineCache>,
+    compute_resources: Res<FlowFieldComputeResources>,
+    mut state: ResMut<FlowFieldComputeState>,
+    mut globals: ResMut<FlowFieldGlobals>,
+) {
+    match *state {
+        FlowFieldComputeState::Loading => {
+            if let CachedPipelineState::Ok(_) =
+                pipeline_cache.get_compute_pipeline_state(compute_resources.init_pipeline_id)
+            {
+                *state = FlowFieldComputeState::Init;
+            }
+        }
+        FlowFieldComputeState::Init => {
+            if let CachedPipelineState::Ok(_) =
+                pipeline_cache.get_compute_pipeline_state(compute_resources.update_pipeline_id)
+            {
+                // Init performs the equivalence of 2 iterations
+                globals.current_iteration = 2;
+                *state = FlowFieldComputeState::Update;
+            }
+        }
+        FlowFieldComputeState::Update => {
+            if globals.current_iteration >= globals.max_iterations {
+                *state = FlowFieldComputeState::Finished;
+            } else {
+                globals.current_iteration += 1;
+            }
+        }
+        FlowFieldComputeState::Finished => {}
+    };
 }
 
 #[derive(Resource, Default)]

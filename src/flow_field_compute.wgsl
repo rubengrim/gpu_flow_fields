@@ -154,7 +154,7 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     index_buffer[base_triangle_index+4u] = base_vertex_index+u32(1u);
     index_buffer[base_triangle_index+5u] = base_vertex_index;
 
-    // // Debug
-    // index_buffer[0] = u32(globals.current_iteration);
+    // Debug
+    index_buffer[0] = u32(globals.current_iteration);
 
 }
