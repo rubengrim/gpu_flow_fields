@@ -28,7 +28,7 @@ const FLOW_FIELD_COMPUTE_SHADER: HandleUntyped =
 const FLOW_FIELD_RENDER_SHADER: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 2388554825);
 
-const WORK_GROUP_SIZE: u32 = 1;
+const WORK_GROUP_SIZE: u32 = 16;
 
 fn main() {
     App::new()
@@ -61,26 +61,22 @@ impl Plugin for FlowFieldPlugin {
             "flow_field_render.wgsl",
             Shader::from_wgsl
         );
-
-        app.add_systems(Update, update_iteration_count)
-            .init_resource::<FlowFieldGlobals>();
     }
 
     fn finish(&self, app: &mut App) {
         let render_app = app.sub_app_mut(RenderApp);
         render_app
+            .init_resource::<FlowFieldGlobals>()
             .init_resource::<FlowFieldComputeState>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
-        render_app
-            .add_systems(Render, update_compute_state.in_set(RenderSet::Prepare))
-            .add_systems(
-                Render,
-                (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
-            );
+        render_app.add_systems(
+            Render,
+            (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
+        );
 
         render_app
             .add_render_graph_node::<ViewNodeRunner<FlowFieldComputeNode>>(
@@ -146,8 +142,8 @@ pub struct FlowFieldGlobals {
 impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
-            num_spawned_lines: 1,
-            max_iterations: 4,
+            num_spawned_lines: 16,
+            max_iterations: 1000,
             current_iteration: 0,
             line_width: 10.0,
         }

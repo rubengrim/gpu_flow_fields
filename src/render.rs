@@ -54,13 +54,13 @@ impl ViewNode for FlowFieldRenderNode {
                 size: (size_of::<f32>() as u32
                     * 16
                     * globals.num_spawned_lines
-                    * (globals.current_iteration))
+                    * (globals.current_iteration - 1))
                     .into(),
                 usage: BufferUsages::VERTEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
 
-        let num_indices = 6 * globals.num_spawned_lines * globals.current_iteration;
+        let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 2);
         let index_buffer = render_context
             .render_device()
             .create_buffer(&BufferDescriptor {

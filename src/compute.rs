@@ -10,19 +10,57 @@ use bevy::{
 };
 use std::{borrow::Cow, mem::size_of};
 
+#[derive(Resource, Default)]
 pub enum FlowFieldComputeState {
+    #[default]
     Loading,
-    Init,
-    Update,
+    Initializing,
+    Updating,
     Finished,
 }
 
-// pub struct FlowFieldComputeNode(FlowFieldComputeState);
+pub struct FlowFieldComputeNode;
 
+// TODO: Refactor. State machine is a mess
 impl ViewNode for FlowFieldComputeNode {
     type ViewQuery = &'static ViewUniformOffset;
 
-    fn update(&mut self, world: &mut World) {}
+    fn update(&mut self, world: &mut World) {
+        // let mut state = world.resource_mut::<FlowFieldComputeState>();
+        world.resource_scope(|world, mut state: Mut<FlowFieldComputeState>| {
+            world.resource_scope(|world, mut globals: Mut<FlowFieldGlobals>| {
+                let compute_resources = world.resource::<FlowFieldComputeResources>();
+                let pipeline_cache = world.resource::<PipelineCache>();
+
+                match *state {
+                    FlowFieldComputeState::Loading => {
+                        if let (CachedPipelineState::Ok(_), CachedPipelineState::Ok(_)) = (
+                            pipeline_cache
+                                .get_compute_pipeline_state(compute_resources.init_pipeline_id),
+                            pipeline_cache
+                                .get_compute_pipeline_state(compute_resources.update_pipeline_id),
+                        ) {
+                            // Init performs the equivalent of 2 iterations.
+                            globals.current_iteration = 2;
+                            *state = FlowFieldComputeState::Initializing;
+                        }
+                    }
+                    FlowFieldComputeState::Initializing => {
+                        globals.current_iteration += 1;
+                        *state = FlowFieldComputeState::Updating;
+                    }
+                    FlowFieldComputeState::Updating => {
+                        if globals.current_iteration > globals.max_iterations {
+                            *state = FlowFieldComputeState::Finished;
+                        } else {
+                            globals.current_iteration += 1;
+                        }
+                    }
+                    FlowFieldComputeState::Finished => {}
+                };
+            });
+        });
+    }
 
     fn run(
         &self,
@@ -34,26 +72,30 @@ impl ViewNode for FlowFieldComputeNode {
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let globals = world.resource::<FlowFieldGlobals>();
         let state = world.resource::<FlowFieldComputeState>();
-        // info!("Current iteration: {}", globals.current_iteration);
+        info!("Current iteration: {}", globals.current_iteration);
         let bind_group = world.resource::<FlowFieldComputeBindGroup>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let (Some(pipeline), Some(bind_group)) = (
             match *state {
                 FlowFieldComputeState::Loading => {
-                    info!("Loading");
+                    // info!("Loading");
                     None
                 }
-                FlowFieldComputeState::Init => {
-                    info!("Init");
+                FlowFieldComputeState::Initializing => {
+                    // info!("Init");
                     pipeline_cache.get_compute_pipeline(compute_resources.init_pipeline_id)
                 }
-                FlowFieldComputeState::Update => {
-                    info!("Update");
+                FlowFieldComputeState::Updating => {
+                    // info!("Update");
                     pipeline_cache.get_compute_pipeline(compute_resources.update_pipeline_id)
                 }
                 FlowFieldComputeState::Finished => {
-                    info!("Finished");
+                    // info!("Finished");
+                    // let device = world.resource::<RenderDevice>();
+                    // let queue = world.resource::<RenderQueue>();
+                    // read_buffer_u32(&compute_resources.index_buffer, device, queue);
+                    // read_buffer_f32(&compute_resources.vertex_buffer, device, queue);
                     None
                 }
             },
@@ -73,8 +115,8 @@ impl ViewNode for FlowFieldComputeNode {
 
         let device = world.resource::<RenderDevice>();
         let queue = world.resource::<RenderQueue>();
-        read_buffer_u32(&compute_resources.index_buffer, device, queue);
-        read_buffer_f32(&compute_resources.vertex_buffer, device, queue);
+        // read_buffer_u32(&compute_resources.index_buffer, device, queue);
+        // read_buffer_f32(&compute_resources.vertex_buffer, device, queue);
 
         Ok(())
     }
@@ -110,7 +152,7 @@ impl FromWorld for FlowFieldComputeResources {
             size: (size_of::<f32>() as u32
                 * 16
                 * globals.num_spawned_lines
-                * (globals.max_iterations + 1))
+                * globals.max_iterations)
                 .into(),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
@@ -121,7 +163,7 @@ impl FromWorld for FlowFieldComputeResources {
             size: (size_of::<u32>() as u32
                 * 6
                 * globals.num_spawned_lines
-                * globals.max_iterations)
+                * (globals.max_iterations - 1))
                 .into(),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
@@ -207,40 +249,6 @@ impl FromWorld for FlowFieldComputeResources {
     }
 }
 
-pub fn update_compute_state(
-    pipeline_cache: Res<PipelineCache>,
-    compute_resources: Res<FlowFieldComputeResources>,
-    mut state: ResMut<FlowFieldComputeState>,
-    mut globals: ResMut<FlowFieldGlobals>,
-) {
-    match *state {
-        FlowFieldComputeState::Loading => {
-            if let CachedPipelineState::Ok(_) =
-                pipeline_cache.get_compute_pipeline_state(compute_resources.init_pipeline_id)
-            {
-                *state = FlowFieldComputeState::Init;
-            }
-        }
-        FlowFieldComputeState::Init => {
-            if let CachedPipelineState::Ok(_) =
-                pipeline_cache.get_compute_pipeline_state(compute_resources.update_pipeline_id)
-            {
-                // Init performs the equivalence of 2 iterations
-                globals.current_iteration = 2;
-                *state = FlowFieldComputeState::Update;
-            }
-        }
-        FlowFieldComputeState::Update => {
-            if globals.current_iteration >= globals.max_iterations {
-                *state = FlowFieldComputeState::Finished;
-            } else {
-                globals.current_iteration += 1;
-            }
-        }
-        FlowFieldComputeState::Finished => {}
-    };
-}
-
 #[derive(Resource, Default)]
 pub struct FlowFieldComputeBindGroup(pub Option<BindGroup>);
 
@@ -250,7 +258,7 @@ pub fn queue_compute_bind_group(
     render_queue: Res<RenderQueue>,
     compute_resources: Res<FlowFieldComputeResources>,
     view_uniforms: Res<ViewUniforms>,
-    globals: Res<FlowFieldGlobals>,
+    mut globals: ResMut<FlowFieldGlobals>,
 ) {
     let globals_buffer = globals.to_buffer(&*render_device, &*render_queue);
 
