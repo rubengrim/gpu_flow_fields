@@ -10,7 +10,14 @@ use bevy::{
 };
 use std::{borrow::Cow, mem::size_of};
 
-pub struct FlowFieldComputeNode;
+pub enum FlowFieldComputeState {
+    Loading,
+    Init,
+    Update,
+    Finished,
+}
+
+// pub struct FlowFieldComputeNode(FlowFieldComputeState);
 
 impl ViewNode for FlowFieldComputeNode {
     type ViewQuery = &'static ViewUniformOffset;
@@ -33,7 +40,10 @@ impl ViewNode for FlowFieldComputeNode {
         let pipeline_cache = world.resource::<PipelineCache>();
         let (Some(pipeline), Some(bind_group)) = (
             match *state {
-                FlowFieldComputeState::Loading => {info!("Loading"); None},
+                FlowFieldComputeState::Loading => {
+                    info!("Loading");
+                    None
+                }
                 FlowFieldComputeState::Init => {
                     info!("Init");
                     pipeline_cache.get_compute_pipeline(compute_resources.init_pipeline_id)
@@ -42,7 +52,10 @@ impl ViewNode for FlowFieldComputeNode {
                     info!("Update");
                     pipeline_cache.get_compute_pipeline(compute_resources.update_pipeline_id)
                 }
-                FlowFieldComputeState::Finished => {info!("Finished"); None},
+                FlowFieldComputeState::Finished => {
+                    info!("Finished");
+                    None
+                }
             },
             bind_group.0.clone(),
         ) else {
@@ -129,7 +142,7 @@ impl FromWorld for FlowFieldComputeResources {
                         },
                         count: None,
                     },
-                    // Settings
+                    // Globals
                     BindGroupLayoutEntry {
                         binding: 1,
                         visibility: ShaderStages::COMPUTE,
@@ -192,15 +205,6 @@ impl FromWorld for FlowFieldComputeResources {
             index_buffer,
         }
     }
-}
-
-#[derive(Resource, Default)]
-pub enum FlowFieldComputeState {
-    #[default]
-    Loading,
-    Init,
-    Update,
-    Finished,
 }
 
 pub fn update_compute_state(

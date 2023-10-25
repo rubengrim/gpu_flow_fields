@@ -61,24 +61,26 @@ impl Plugin for FlowFieldPlugin {
             "flow_field_render.wgsl",
             Shader::from_wgsl
         );
+
+        app.add_systems(Update, update_iteration_count)
+            .init_resource::<FlowFieldGlobals>();
     }
 
     fn finish(&self, app: &mut App) {
-        // app.init_resource::<FlowFieldUniforms>();
-
         let render_app = app.sub_app_mut(RenderApp);
         render_app
-            .init_resource::<FlowFieldGlobals>()
             .init_resource::<FlowFieldComputeState>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
-        render_app.add_systems(
-            Render,
-            (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
-        );
+        render_app
+            .add_systems(Render, update_compute_state.in_set(RenderSet::Prepare))
+            .add_systems(
+                Render,
+                (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
+            );
 
         render_app
             .add_render_graph_node::<ViewNodeRunner<FlowFieldComputeNode>>(
@@ -100,6 +102,8 @@ impl Plugin for FlowFieldPlugin {
         );
     }
 }
+
+pub fn update_iteration_count() {}
 
 #[derive(Component, Default)]
 pub struct FlowFieldCameraLabel;
