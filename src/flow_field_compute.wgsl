@@ -87,8 +87,8 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     // Create an initial line segment of 4 vertices.
     // Corresponds to two iterations.
 
-    let line_width = 7.0;
-    let step_size = 10.0;
+    let line_width = 1.5;
+    let step_size = 5.0;
     // Temporary arbitrary direction
     let field_direction = vec2<f32>(1.0, 1.0); 
 
@@ -123,16 +123,22 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     index_buffer[first_triangle_index+4u] = first_vertex_index+3u;
     index_buffer[first_triangle_index+5u] = first_vertex_index+2u;
 
+    // let d = globals.current_iteration;
+    // index_buffer[first_triangle_index] = d;
+    // index_buffer[first_triangle_index+1u] = d;
+    // index_buffer[first_triangle_index+2u] = d;
+    // index_buffer[first_triangle_index+3u] = d;
+    // index_buffer[first_triangle_index+4u] = d;
+    // index_buffer[first_triangle_index+5u] = d;
+
     // Debug
     // index_buffer[0] = u32(globals.current_iteration);
 }
 
 @compute @workgroup_size(16, 1, 1)
 fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let line_width = 3.0;
-    let step_size = 10.0;
-    // Temporary arbitrary direction
-    let field_direction = vec2<f32>(1.0, 1.0); 
+    let line_width = 1.5;
+    let step_size = 5.0;
 
     let base_vertex_index = 2u * globals.current_iteration + 2u * globals.max_iterations * invocation_id.x;
     let base_triangle_index = 6u * (globals.current_iteration - 1u) + 6u * (globals.max_iterations - 1u) * invocation_id.x;
@@ -142,6 +148,9 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let prev_joint_v2_pos = vertex_buffer[base_vertex_index-u32(1)].position.xy;
 
     let prev_joint = prev_joint_v1_pos + 0.5 * (prev_joint_v2_pos - prev_joint_v1_pos);
+
+    let field_angle = perlinNoise2(prev_joint * 0.003) * 2.0 * 3.1415;
+    let field_direction = vec2<f32>(cos(field_angle), sin(field_angle));
 
     let new_joint = vec2<f32>(prev_joint.x + field_direction.x * step_size, prev_joint.y + field_direction.y * step_size);
     let new_joint_vertices = create_vertices_for_line_joint(new_joint, field_direction, line_width);
@@ -157,6 +166,52 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     index_buffer[base_triangle_index+4u] = base_vertex_index+u32(1u);
     index_buffer[base_triangle_index+5u] = base_vertex_index;
 
+    // let d = globals.current_iteration;
+    // index_buffer[base_triangle_index] = d;
+    // index_buffer[base_triangle_index+1u] = d;
+    // index_buffer[base_triangle_index+2u] = d;
+    // index_buffer[base_triangle_index+3u] = d;
+    // index_buffer[base_triangle_index+4u] = d;
+    // index_buffer[base_triangle_index+5u] = d;
+
     // Debug
     // index_buffer[0] = u32(globals.current_iteration);
+}
+
+// MIT License. © Stefan Gustavson, Munrocket
+//
+fn permute4(x: vec4f) -> vec4f { return ((x * 34. + 1.) * x) % vec4f(289.); }
+fn fade2(t: vec2f) -> vec2f { return t * t * t * (t * (t * 6. - 15.) + 10.); }
+
+fn perlinNoise2(P: vec2f) -> f32 {
+    var Pi: vec4f = floor(P.xyxy) + vec4f(0., 0., 1., 1.);
+    let Pf = fract(P.xyxy) - vec4f(0., 0., 1., 1.);
+    Pi = Pi % vec4f(289.); // To avoid truncation effects in permutation
+    let ix = Pi.xzxz;
+    let iy = Pi.yyww;
+    let fx = Pf.xzxz;
+    let fy = Pf.yyww;
+    let i = permute4(permute4(ix) + iy);
+    var gx: vec4f = 2. * fract(i * 0.0243902439) - 1.; // 1/41 = 0.024...
+    let gy = abs(gx) - 0.5;
+    let tx = floor(gx + 0.5);
+    gx = gx - tx;
+    var g00: vec2f = vec2f(gx.x, gy.x);
+    var g10: vec2f = vec2f(gx.y, gy.y);
+    var g01: vec2f = vec2f(gx.z, gy.z);
+    var g11: vec2f = vec2f(gx.w, gy.w);
+    let norm = 1.79284291400159 - 0.85373472095314 *
+        vec4f(dot(g00, g00), dot(g01, g01), dot(g10, g10), dot(g11, g11));
+    g00 = g00 * norm.x;
+    g01 = g01 * norm.y;
+    g10 = g10 * norm.z;
+    g11 = g11 * norm.w;
+    let n00 = dot(g00, vec2f(fx.x, fy.x));
+    let n10 = dot(g10, vec2f(fx.y, fy.y));
+    let n01 = dot(g01, vec2f(fx.z, fy.z));
+    let n11 = dot(g11, vec2f(fx.w, fy.w));
+    let fade_xy = fade2(Pf.xy);
+    let n_x = mix(vec2f(n00, n01), vec2f(n10, n11), vec2f(fade_xy.x));
+    let n_xy = mix(n_x.x, n_x.y, fade_xy.y);
+    return 2.3 * n_xy;
 }

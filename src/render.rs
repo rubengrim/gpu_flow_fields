@@ -51,21 +51,16 @@ impl ViewNode for FlowFieldRenderNode {
             .render_device()
             .create_buffer(&BufferDescriptor {
                 label: Some("vertex_buffer"),
-                size: (size_of::<f32>() as u32
-                    * 16
-                    * globals.num_spawned_lines
-                    * (globals.current_iteration - 1))
-                    .into(),
+                size: compute_resources.vertex_buffer.size(),
                 usage: BufferUsages::VERTEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
 
-        let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 2);
         let index_buffer = render_context
             .render_device()
             .create_buffer(&BufferDescriptor {
                 label: Some("index_buffer"),
-                size: (size_of::<u32>() as u32 * num_indices).into(),
+                size: compute_resources.index_buffer.size(),
                 usage: BufferUsages::INDEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
@@ -90,6 +85,28 @@ impl ViewNode for FlowFieldRenderNode {
             index_buffer.size(),
         );
 
+        // #[rustfmt::skip]
+        // let vertex_data: &[f32] = &[
+        //     -50.0, -50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
+        //     50.0, -50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
+        //     50.0, 50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
+        //     -50.0, 50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
+        // ];
+
+        // let index_data: &[u8] = &[0, 1, 2, 0, 2, 3];
+
+        // let vertex_buffer = render_context.render_device().create_buffer_with_data(&BufferInitDescriptor {
+        //     label: None,
+        //     contents: bytemuck::cast_slice(vertex_data),
+        //     usage: BufferUsages::INDEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC
+        // });
+
+        // let index_buffer = render_context.render_device().create_buffer_with_data(&BufferInitDescriptor {
+        //     label: None,
+        //     contents: index_data,
+        //     usage: BufferUsages::INDEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC
+        // });
+
         let queue = world.resource::<RenderQueue>();
         queue.submit([encoder.finish()]);
 
@@ -108,6 +125,9 @@ impl ViewNode for FlowFieldRenderNode {
             })],
             depth_stencil_attachment: None,
         });
+
+        // let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 1);
+        let num_indices = 6 * globals.num_spawned_lines * (globals.max_iterations - 1);
 
         pass.set_render_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
@@ -152,7 +172,7 @@ impl FromWorld for FlowFieldRenderResources {
                             },
                             count: None,
                         },
-                        // Settings
+                        // Globals
                         BindGroupLayoutEntry {
                             binding: 1,
                             visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
@@ -184,12 +204,12 @@ impl FromWorld for FlowFieldRenderResources {
                     step_mode: VertexStepMode::Vertex,
                     attributes: vec![
                         VertexAttribute {
-                            format: VertexFormat::Float32x2,
+                            format: VertexFormat::Float32x4,
                             offset: 0,
                             shader_location: 0,
                         },
                         VertexAttribute {
-                            format: VertexFormat::Float32x3,
+                            format: VertexFormat::Float32x4,
                             offset: (size_of::<f32>() * 4) as u64,
                             shader_location: 1,
                         },

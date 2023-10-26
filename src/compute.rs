@@ -50,7 +50,7 @@ impl ViewNode for FlowFieldComputeNode {
                         *state = FlowFieldComputeState::Updating;
                     }
                     FlowFieldComputeState::Updating => {
-                        if globals.current_iteration > globals.max_iterations {
+                        if globals.current_iteration >= globals.max_iterations {
                             *state = FlowFieldComputeState::Finished;
                         } else {
                             globals.current_iteration += 1;
@@ -72,7 +72,7 @@ impl ViewNode for FlowFieldComputeNode {
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let globals = world.resource::<FlowFieldGlobals>();
         let state = world.resource::<FlowFieldComputeState>();
-        info!("Current iteration: {}", globals.current_iteration);
+        // info!("Current iteration: {}", globals.current_iteration);
         let bind_group = world.resource::<FlowFieldComputeBindGroup>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
@@ -111,7 +111,9 @@ impl ViewNode for FlowFieldComputeNode {
 
         pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
         pass.set_pipeline(&pipeline);
-        pass.dispatch_workgroups(globals.num_spawned_lines / WORK_GROUP_SIZE, 1, 1);
+        let num_workgroups =
+            (globals.num_spawned_lines as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
+        pass.dispatch_workgroups(num_workgroups, 1, 1);
 
         let device = world.resource::<RenderDevice>();
         let queue = world.resource::<RenderQueue>();
