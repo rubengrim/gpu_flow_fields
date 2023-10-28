@@ -4,6 +4,7 @@ struct Globals {
     num_spawned_lines: u32,
     max_iterations: u32,
     current_iteration: u32,
+    step_size: f32,
     line_width: f32,
 }
 
@@ -87,8 +88,8 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     // Create an initial line segment of 4 vertices.
     // Corresponds to two iterations.
 
-    let line_width = 1.5;
-    let step_size = 5.0;
+    // let line_width = 10.0;
+    // let step_size = 2.0;
     // Temporary arbitrary direction
     let field_direction = vec2<f32>(1.0, 1.0); 
 
@@ -100,13 +101,13 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     let viewport_bottom_left = vec2<f32>(view.viewport.x - view.viewport.z / 2.0, view.viewport.y - view.viewport.w / 2.0);
     let joint_1 = vec2<f32>(viewport_bottom_left.x + random_f32(seed_1) * view.viewport.z,  viewport_bottom_left.y + random_f32(seed_2) * view.viewport.w);
     // let joint_1 = vec2<f32>(viewport_bottom_left.x + 0.5 * view.viewport.z,  viewport_bottom_left.y + 0.5 * view.viewport.w);
-    let joint_2 = vec2<f32>(joint_1.x + field_direction.x * step_size, joint_1.y + field_direction.y * step_size);
+    let joint_2 = vec2<f32>(joint_1.x + field_direction.x * globals.step_size, joint_1.y + field_direction.y * globals.step_size);
 
     // let joint_1 = vec2<f32>(100.0, 100.0);
     // let joint_2 = vec2<f32>(150.0, 100.0);
 
-    let joint_1_vertices = create_vertices_for_line_joint(joint_1, field_direction, line_width);
-    let joint_2_vertices = create_vertices_for_line_joint(joint_2, field_direction, line_width);
+    let joint_1_vertices = create_vertices_for_line_joint(joint_1, field_direction, globals.line_width);
+    let joint_2_vertices = create_vertices_for_line_joint(joint_2, field_direction, globals.line_width);
 
     let first_vertex_index = 2u * globals.max_iterations * invocation_id.x;
     let first_triangle_index = 6u * (globals.max_iterations - 1u) * invocation_id.x;
@@ -137,8 +138,8 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
 
 @compute @workgroup_size(16, 1, 1)
 fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    let line_width = 1.5;
-    let step_size = 5.0;
+    // let line_width = 10.0;
+    // let step_size = 2.0;
 
     let base_vertex_index = 2u * globals.current_iteration + 2u * globals.max_iterations * invocation_id.x;
     let base_triangle_index = 6u * (globals.current_iteration - 1u) + 6u * (globals.max_iterations - 1u) * invocation_id.x;
@@ -152,8 +153,8 @@ fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
     let field_angle = perlinNoise2(prev_joint * 0.003) * 2.0 * 3.1415;
     let field_direction = vec2<f32>(cos(field_angle), sin(field_angle));
 
-    let new_joint = vec2<f32>(prev_joint.x + field_direction.x * step_size, prev_joint.y + field_direction.y * step_size);
-    let new_joint_vertices = create_vertices_for_line_joint(new_joint, field_direction, line_width);
+    let new_joint = vec2<f32>(prev_joint.x + field_direction.x * globals.step_size, prev_joint.y + field_direction.y * globals.step_size);
+    let new_joint_vertices = create_vertices_for_line_joint(new_joint, field_direction, globals.line_width);
 
 
     vertex_buffer[base_vertex_index] = new_joint_vertices.first;

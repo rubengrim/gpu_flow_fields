@@ -1755,6 +1755,7 @@ name = "gpu_flow_fields"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytemuck",
  "wgpu",
 ]
 

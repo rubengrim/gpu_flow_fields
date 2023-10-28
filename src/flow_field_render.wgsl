@@ -4,6 +4,7 @@ struct Globals {
     num_spawned_lines: u32,
     max_iterations: u32,
     current_iteration: u32,
+    step_size: f32,
     line_width: f32,
 }
 
@@ -31,5 +32,5 @@ fn vertex(in: VertexInput) -> VertexOutput {
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // return vec4<f32>(in.color, 1.0);
-    return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    return vec4<f32>(0.4, 0.2, 0.6, 1.0);
 }

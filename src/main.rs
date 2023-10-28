@@ -1,17 +1,23 @@
 use bevy::{
     asset::load_internal_asset,
-    core_pipeline::{core_2d, tonemapping::Tonemapping},
+    core_pipeline::{
+        core_2d,
+        experimental::taa::{TemporalAntiAliasBundle, TemporalAntiAliasPlugin},
+        tonemapping::Tonemapping,
+    },
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
     reflect::TypeUuid,
     render::{
         camera::CameraRenderGraph,
-        extract_resource::ExtractResource,
+        extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_graph::{RenderGraphApp, ViewNodeRunner},
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         view::ColorGrading,
         Render, RenderApp, RenderSet,
     },
+    window::{WindowResized, WindowResolution},
 };
 
 mod compute;
@@ -30,9 +36,24 @@ const FLOW_FIELD_RENDER_SHADER: HandleUntyped =
 
 const WORK_GROUP_SIZE: u32 = 16;
 
+const WINDOW_WIDTH: u32 = 1920;
+const WINDOW_HEIGHT: u32 = 1080;
+
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, FlowFieldPlugin))
+        .add_plugins((
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    resolution: WindowResolution::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32),
+                    ..default()
+                }),
+                ..default()
+            }),
+            TemporalAntiAliasPlugin,
+            LogDiagnosticsPlugin::default(),
+            FrameTimeDiagnosticsPlugin::default(),
+            FlowFieldPlugin,
+        ))
         .add_systems(Startup, setup)
         .run();
 }
@@ -42,7 +63,7 @@ fn setup(mut commands: Commands) {
     //     camera_render_graph: CameraRenderGraph::new(FLOW_FIELD_RENDER_GRAPH),
     //     ..default()
     // });
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn((Camera2dBundle::default(),));
 }
 
 struct FlowFieldPlugin;
@@ -61,6 +82,13 @@ impl Plugin for FlowFieldPlugin {
             "flow_field_render.wgsl",
             Shader::from_wgsl
         );
+
+        app.insert_resource(WindowSize {
+            width: WINDOW_WIDTH,
+            height: WINDOW_HEIGHT,
+        })
+        .add_plugins(ExtractResourcePlugin::<WindowSize>::default())
+        .add_systems(Update, on_window_resize);
     }
 
     fn finish(&self, app: &mut App) {
@@ -70,6 +98,7 @@ impl Plugin for FlowFieldPlugin {
             .init_resource::<FlowFieldComputeState>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
+            .init_resource::<MultisampleRenderTexture>()
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
@@ -99,7 +128,21 @@ impl Plugin for FlowFieldPlugin {
     }
 }
 
-pub fn update_iteration_count() {}
+#[derive(Resource, Clone, ExtractResource)]
+pub struct WindowSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+pub fn on_window_resize(
+    mut window_size: ResMut<WindowSize>,
+    mut resize_event_reader: EventReader<WindowResized>,
+) {
+    for e in resize_event_reader.iter() {
+        window_size.width = e.width as u32;
+        window_size.height = e.height as u32;
+    }
+}
 
 #[derive(Component, Default)]
 pub struct FlowFieldCameraLabel;
@@ -136,16 +179,18 @@ pub struct FlowFieldGlobals {
     pub num_spawned_lines: u32,
     pub max_iterations: u32,
     pub current_iteration: u32,
+    pub step_size: f32,
     pub line_width: f32,
 }
 
 impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
-            num_spawned_lines: 100,
-            max_iterations: 4000,
+            num_spawned_lines: 1000,
+            max_iterations: 1000,
             current_iteration: 0,
-            line_width: 10.0,
+            step_size: 4.0,
+            line_width: 5.0,
         }
     }
 }

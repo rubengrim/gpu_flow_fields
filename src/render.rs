@@ -17,7 +17,8 @@ use wgpu::{
 };
 
 use crate::{
-    compute::FlowFieldComputeResources, utilities::*, FlowFieldGlobals, FLOW_FIELD_RENDER_SHADER,
+    compute::FlowFieldComputeResources, utilities::*, FlowFieldGlobals, WindowSize,
+    FLOW_FIELD_RENDER_SHADER, WINDOW_HEIGHT, WINDOW_WIDTH,
 };
 
 pub struct FlowFieldRenderNode;
@@ -38,6 +39,7 @@ impl ViewNode for FlowFieldRenderNode {
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let render_resources = world.resource::<FlowFieldRenderResources>();
         let bind_group = world.resource::<FlowFieldRenderBindGroup>();
+        let ms_texture = world.resource::<MultisampleRenderTexture>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let (Some(pipeline), Some(bind_group)) = (
@@ -116,8 +118,8 @@ impl ViewNode for FlowFieldRenderNode {
         let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
             label: None,
             color_attachments: &[Some(RenderPassColorAttachment {
-                view: view_target.main_texture_view(),
-                resolve_target: None,
+                view: &ms_texture.view,
+                resolve_target: Some(view_target.main_texture_view()),
                 ops: Operations {
                     load: LoadOp::Clear(wgpu::Color::WHITE),
                     store: true,
@@ -144,6 +146,86 @@ impl FromWorld for FlowFieldRenderNode {
         Self
     }
 }
+
+#[derive(Resource)]
+pub struct MultisampleRenderTexture {
+    pub texture: Texture,
+    pub view: TextureView,
+}
+
+impl FromWorld for MultisampleRenderTexture {
+    fn from_world(world: &mut World) -> Self {
+        // let window_size = world.resource::<WindowSize>();
+        let device = world.resource::<RenderDevice>();
+
+        let texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: WINDOW_WIDTH,
+                height: WINDOW_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 8,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::COPY_SRC
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[TextureFormat::Rgba8UnormSrgb],
+        });
+
+        let view = texture.create_view(&TextureViewDescriptor {
+            label: None,
+            format: Some(TextureFormat::Rgba8UnormSrgb),
+            dimension: Some(TextureViewDimension::D2),
+            aspect: TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        });
+
+        Self { texture, view }
+    }
+}
+
+// pub fn create_multisample_texture(
+//     mut texture_resource: ResMut<MultisampleRenderTexture>,
+//     device: Res<RenderDevice>,
+//     window_q: Query<&Window>,
+// ) {
+//     let window = window_q.get_single().expect("NO WINDOW IN RENDER WORLD");
+//     let window_size = Extent3d {
+//         width: window.resolution.width() as u32,
+//         height: window.resolution.height() as u32,
+//         depth_or_array_layers: 1,
+//     };
+//     let ms_texture = device.create_texture(&TextureDescriptor {
+//         label: None,
+//         size: window_size,
+//         mip_level_count: 1,
+//         sample_count: 4,
+//         dimension: TextureDimension::D2,
+//         format: TextureFormat::Rgba8UnormSrgb,
+//         usage: TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING,
+//         view_formats: &[TextureFormat::Rgba8UnormSrgb],
+//     });
+
+//     let ms_view = ms_texture.create_view(&TextureViewDescriptor {
+//         label: None,
+//         format: Some(TextureFormat::Rgba8UnormSrgb),
+//         dimension: Some(TextureViewDimension::D2),
+//         aspect: TextureAspect::All,
+//         base_mip_level: 1,
+//         mip_level_count: None,
+//         base_array_layer: 1,
+//         array_layer_count: None,
+//     });
+
+//     texture_resource.texture = ms_texture;
+//     texture_resource.view = ms_view;
+// }
 
 #[derive(Resource)]
 pub struct FlowFieldRenderResources {
@@ -228,7 +310,7 @@ impl FromWorld for FlowFieldRenderResources {
             },
             depth_stencil: None,
             multisample: MultisampleState {
-                count: 1,
+                count: 8,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
