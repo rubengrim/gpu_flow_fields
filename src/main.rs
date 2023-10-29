@@ -36,20 +36,10 @@ const FLOW_FIELD_RENDER_SHADER: HandleUntyped =
 
 const WORK_GROUP_SIZE: u32 = 16;
 
-const WINDOW_WIDTH: u32 = 1920;
-const WINDOW_HEIGHT: u32 = 1080;
-
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    resolution: WindowResolution::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32),
-                    ..default()
-                }),
-                ..default()
-            }),
-            TemporalAntiAliasPlugin,
+            DefaultPlugins,
             LogDiagnosticsPlugin::default(),
             FrameTimeDiagnosticsPlugin::default(),
             FlowFieldPlugin,
@@ -83,9 +73,11 @@ impl Plugin for FlowFieldPlugin {
             Shader::from_wgsl
         );
 
+        let window = app.world.query::<&Window>().single(&app.world);
         app.insert_resource(WindowSize {
-            width: WINDOW_WIDTH,
-            height: WINDOW_HEIGHT,
+            width: window.resolution.width() as u32,
+            height: window.resolution.height() as u32,
+            resized: true,
         })
         .add_plugins(ExtractResourcePlugin::<WindowSize>::default())
         .add_systems(Update, on_window_resize);
@@ -98,14 +90,16 @@ impl Plugin for FlowFieldPlugin {
             .init_resource::<FlowFieldComputeState>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
-            .init_resource::<MultisampleRenderTexture>()
+            .init_resource::<MSRenderTarget>()
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
-        render_app.add_systems(
-            Render,
-            (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
-        );
+        render_app
+            .add_systems(Render, update_ms_render_target.in_set(RenderSet::Prepare))
+            .add_systems(
+                Render,
+                (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
+            );
 
         render_app
             .add_render_graph_node::<ViewNodeRunner<FlowFieldComputeNode>>(
@@ -132,15 +126,19 @@ impl Plugin for FlowFieldPlugin {
 pub struct WindowSize {
     pub width: u32,
     pub height: u32,
+    // Resized this frame
+    pub resized: bool,
 }
 
 pub fn on_window_resize(
     mut window_size: ResMut<WindowSize>,
     mut resize_event_reader: EventReader<WindowResized>,
 ) {
+    window_size.resized = false;
     for e in resize_event_reader.iter() {
         window_size.width = e.width as u32;
         window_size.height = e.height as u32;
+        window_size.resized = true;
     }
 }
 

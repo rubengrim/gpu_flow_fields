@@ -18,7 +18,7 @@ use wgpu::{
 
 use crate::{
     compute::FlowFieldComputeResources, utilities::*, FlowFieldGlobals, WindowSize,
-    FLOW_FIELD_RENDER_SHADER, WINDOW_HEIGHT, WINDOW_WIDTH,
+    FLOW_FIELD_RENDER_SHADER,
 };
 
 pub struct FlowFieldRenderNode;
@@ -39,7 +39,6 @@ impl ViewNode for FlowFieldRenderNode {
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let render_resources = world.resource::<FlowFieldRenderResources>();
         let bind_group = world.resource::<FlowFieldRenderBindGroup>();
-        let ms_texture = world.resource::<MultisampleRenderTexture>();
 
         let pipeline_cache = world.resource::<PipelineCache>();
         let (Some(pipeline), Some(bind_group)) = (
@@ -115,27 +114,30 @@ impl ViewNode for FlowFieldRenderNode {
         // read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
         // read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
 
-        let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(RenderPassColorAttachment {
-                view: &ms_texture.view,
-                resolve_target: Some(view_target.main_texture_view()),
-                ops: Operations {
-                    load: LoadOp::Clear(wgpu::Color::WHITE),
-                    store: true,
-                },
-            })],
-            depth_stencil_attachment: None,
-        });
+        let ms_render_target = world.resource::<MSRenderTarget>();
+        if let Some(target_view) = &ms_render_target.view {
+            let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(RenderPassColorAttachment {
+                    view: target_view,
+                    resolve_target: Some(view_target.main_texture_view()),
+                    ops: Operations {
+                        load: LoadOp::Clear(wgpu::Color::WHITE),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
 
-        // let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 1);
-        let num_indices = 6 * globals.num_spawned_lines * (globals.max_iterations - 1);
+            // let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 1);
+            let num_indices = 6 * globals.num_spawned_lines * (globals.max_iterations - 1);
 
-        pass.set_render_pipeline(&pipeline);
-        pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.set_index_buffer(index_buffer.slice(..), 0, IndexFormat::Uint32);
-        pass.draw_indexed(0..num_indices, 0, 0..1);
+            pass.set_render_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.set_index_buffer(index_buffer.slice(..), 0, IndexFormat::Uint32);
+            pass.draw_indexed(0..num_indices, 0, 0..1);
+        }
 
         Ok(())
     }
@@ -148,21 +150,31 @@ impl FromWorld for FlowFieldRenderNode {
 }
 
 #[derive(Resource)]
-pub struct MultisampleRenderTexture {
-    pub texture: Texture,
-    pub view: TextureView,
+pub struct MSRenderTarget {
+    pub texture: Option<Texture>,
+    pub view: Option<TextureView>,
 }
 
-impl FromWorld for MultisampleRenderTexture {
-    fn from_world(world: &mut World) -> Self {
-        // let window_size = world.resource::<WindowSize>();
-        let device = world.resource::<RenderDevice>();
+impl Default for MSRenderTarget {
+    fn default() -> Self {
+        Self {
+            texture: None,
+            view: None,
+        }
+    }
+}
 
-        let texture = device.create_texture(&TextureDescriptor {
+pub fn update_ms_render_target(
+    mut ms_target: ResMut<MSRenderTarget>,
+    window_size: Res<WindowSize>,
+    device: Res<RenderDevice>,
+) {
+    if window_size.resized {
+        let ms_texture = device.create_texture(&TextureDescriptor {
             label: None,
             size: Extent3d {
-                width: WINDOW_WIDTH,
-                height: WINDOW_HEIGHT,
+                width: window_size.width,
+                height: window_size.height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -175,7 +187,7 @@ impl FromWorld for MultisampleRenderTexture {
             view_formats: &[TextureFormat::Rgba8UnormSrgb],
         });
 
-        let view = texture.create_view(&TextureViewDescriptor {
+        let ms_view = ms_texture.create_view(&TextureViewDescriptor {
             label: None,
             format: Some(TextureFormat::Rgba8UnormSrgb),
             dimension: Some(TextureViewDimension::D2),
@@ -186,46 +198,10 @@ impl FromWorld for MultisampleRenderTexture {
             array_layer_count: None,
         });
 
-        Self { texture, view }
+        ms_target.texture = Some(ms_texture);
+        ms_target.view = Some(ms_view);
     }
 }
-
-// pub fn create_multisample_texture(
-//     mut texture_resource: ResMut<MultisampleRenderTexture>,
-//     device: Res<RenderDevice>,
-//     window_q: Query<&Window>,
-// ) {
-//     let window = window_q.get_single().expect("NO WINDOW IN RENDER WORLD");
-//     let window_size = Extent3d {
-//         width: window.resolution.width() as u32,
-//         height: window.resolution.height() as u32,
-//         depth_or_array_layers: 1,
-//     };
-//     let ms_texture = device.create_texture(&TextureDescriptor {
-//         label: None,
-//         size: window_size,
-//         mip_level_count: 1,
-//         sample_count: 4,
-//         dimension: TextureDimension::D2,
-//         format: TextureFormat::Rgba8UnormSrgb,
-//         usage: TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING,
-//         view_formats: &[TextureFormat::Rgba8UnormSrgb],
-//     });
-
-//     let ms_view = ms_texture.create_view(&TextureViewDescriptor {
-//         label: None,
-//         format: Some(TextureFormat::Rgba8UnormSrgb),
-//         dimension: Some(TextureViewDimension::D2),
-//         aspect: TextureAspect::All,
-//         base_mip_level: 1,
-//         mip_level_count: None,
-//         base_array_layer: 1,
-//         array_layer_count: None,
-//     });
-
-//     texture_resource.texture = ms_texture;
-//     texture_resource.view = ms_view;
-// }
 
 #[derive(Resource)]
 pub struct FlowFieldRenderResources {
