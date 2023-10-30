@@ -73,20 +73,35 @@ impl Plugin for FlowFieldPlugin {
             Shader::from_wgsl
         );
 
-        let window = app.world.query::<&Window>().single(&app.world);
-        app.insert_resource(WindowSize {
-            width: window.resolution.width() as u32,
-            height: window.resolution.height() as u32,
-            resized: true,
-        })
-        .add_plugins(ExtractResourcePlugin::<WindowSize>::default())
-        .add_systems(Update, on_window_resize);
+        // let window = app.world.query::<&Window>().single(&app.world);
+
+        // app.sub_app_mut(RenderApp).insert_resource(WindowSize {
+        //     width: width as u32,
+        //     height: height as u32,
+        //     resized: true,
+        // });
+
+        // app.insert_resource(WindowSize {
+        //     width: window.resolution.width() as u32,
+        //     height: window.resolution.height() as u32,
+        //     resized: true,
+        // })
+        // .add_plugins(ExtractResourcePlugin::<WindowSize>::default())
+        // .add_systems(Update, on_window_resize);
     }
 
     fn finish(&self, app: &mut App) {
+        let window = app.world.query::<&Window>().single(&app.world);
+        let width = window.resolution.width();
+        let height = window.resolution.height();
+
         let render_app = app.sub_app_mut(RenderApp);
         render_app
-            .init_resource::<FlowFieldGlobals>()
+            .insert_resource(FlowFieldGlobals {
+                viewport_width: width,
+                viewport_height: height,
+                ..default()
+            })
             .init_resource::<FlowFieldComputeState>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
@@ -94,12 +109,10 @@ impl Plugin for FlowFieldPlugin {
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
-        render_app
-            .add_systems(Render, update_ms_render_target.in_set(RenderSet::Prepare))
-            .add_systems(
-                Render,
-                (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
-            );
+        render_app.add_systems(
+            Render,
+            (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
+        );
 
         render_app
             .add_render_graph_node::<ViewNodeRunner<FlowFieldComputeNode>>(
@@ -175,20 +188,32 @@ impl Default for FlowFieldCameraBundle {
 #[derive(Resource, ExtractResource, ShaderType, Clone, Copy)]
 pub struct FlowFieldGlobals {
     pub num_spawned_lines: u32,
+    // Needs to be > 2
     pub max_iterations: u32,
     pub current_iteration: u32,
     pub step_size: f32,
     pub line_width: f32,
+    // Does not update when resizing window
+    pub viewport_width: f32,
+    // Does not update when resizing window
+    pub viewport_height: f32,
+    // Space between grid points when discretizing the flow field
+    pub grid_point_distance: f32,
+    pub grid_margin: f32,
 }
 
 impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
             num_spawned_lines: 1000,
-            max_iterations: 1000,
+            max_iterations: 500,
             current_iteration: 0,
-            step_size: 4.0,
-            line_width: 5.0,
+            step_size: 1.0,
+            line_width: 2.0,
+            viewport_width: 640.0,
+            viewport_height: 480.0,
+            grid_point_distance: 5.0,
+            grid_margin: 100.0,
         }
     }
 }

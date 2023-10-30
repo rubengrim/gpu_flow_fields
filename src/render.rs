@@ -136,6 +136,7 @@ impl ViewNode for FlowFieldRenderNode {
             pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             pass.set_index_buffer(index_buffer.slice(..), 0, IndexFormat::Uint32);
+
             pass.draw_indexed(0..num_indices, 0, 0..1);
         }
 
@@ -155,26 +156,16 @@ pub struct MSRenderTarget {
     pub view: Option<TextureView>,
 }
 
-impl Default for MSRenderTarget {
-    fn default() -> Self {
-        Self {
-            texture: None,
-            view: None,
-        }
-    }
-}
+impl FromWorld for MSRenderTarget {
+    fn from_world(world: &mut World) -> Self {
+        let device = world.resource::<RenderDevice>();
+        let globals = world.resource::<FlowFieldGlobals>();
 
-pub fn update_ms_render_target(
-    mut ms_target: ResMut<MSRenderTarget>,
-    window_size: Res<WindowSize>,
-    device: Res<RenderDevice>,
-) {
-    if window_size.resized {
         let ms_texture = device.create_texture(&TextureDescriptor {
             label: None,
             size: Extent3d {
-                width: window_size.width,
-                height: window_size.height,
+                width: globals.viewport_width as u32,
+                height: globals.viewport_height as u32,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -198,8 +189,10 @@ pub fn update_ms_render_target(
             array_layer_count: None,
         });
 
-        ms_target.texture = Some(ms_texture);
-        ms_target.view = Some(ms_view);
+        Self {
+            texture: Some(ms_texture),
+            view: Some(ms_view),
+        }
     }
 }
 
