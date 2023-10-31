@@ -195,11 +195,10 @@ fn get_cached_field_direction(pos: vec2<f32>) -> vec2<f32> {
 }
 
 fn get_true_field_direction(pos: vec2<f32>) -> vec2<f32> {
-    // let field_angle = 6.2832 * perlinNoise2(pos * 0.003);
-    // let field_direction = normalize(vec2<f32>(cos(field_angle), sin(field_angle)));
+    let field_angle = 6.2832 * perlinNoise2(pos * 0.003);
+    let field_direction = normalize(vec2<f32>(cos(field_angle), sin(field_angle)));
     
-    // return field_direction;
-    return vec2<f32>(1.0, 0.0);
+    return field_direction;
 }
 
 // Create an initial line segment of 4 vertices.

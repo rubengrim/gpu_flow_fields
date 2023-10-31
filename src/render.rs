@@ -48,76 +48,13 @@ impl ViewNode for FlowFieldRenderNode {
             return Ok(());
         };
 
-        let vertex_buffer = render_context
-            .render_device()
-            .create_buffer(&BufferDescriptor {
-                label: Some("vertex_buffer"),
-                size: compute_resources.vertex_buffer.size(),
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
-
-        let index_buffer = render_context
-            .render_device()
-            .create_buffer(&BufferDescriptor {
-                label: Some("index_buffer"),
-                size: compute_resources.index_buffer.size(),
-                usage: BufferUsages::INDEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
-
-        let mut encoder = render_context
-            .render_device()
-            .create_command_encoder(&CommandEncoderDescriptor { label: None });
-
-        encoder.copy_buffer_to_buffer(
-            &compute_resources.vertex_buffer,
-            0,
-            &vertex_buffer,
-            0,
-            vertex_buffer.size(),
-        );
-
-        encoder.copy_buffer_to_buffer(
-            &compute_resources.index_buffer,
-            0,
-            &index_buffer,
-            0,
-            index_buffer.size(),
-        );
-
-        // #[rustfmt::skip]
-        // let vertex_data: &[f32] = &[
-        //     -50.0, -50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
-        //     50.0, -50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
-        //     50.0, 50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
-        //     -50.0, 50.0, 0.0, 0.0, 1.0, 0.5, 0.5, 1.0,
-        // ];
-
-        // let index_data: &[u8] = &[0, 1, 2, 0, 2, 3];
-
-        // let vertex_buffer = render_context.render_device().create_buffer_with_data(&BufferInitDescriptor {
-        //     label: None,
-        //     contents: bytemuck::cast_slice(vertex_data),
-        //     usage: BufferUsages::INDEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC
-        // });
-
-        // let index_buffer = render_context.render_device().create_buffer_with_data(&BufferInitDescriptor {
-        //     label: None,
-        //     contents: index_data,
-        //     usage: BufferUsages::INDEX | BufferUsages::COPY_DST | BufferUsages::COPY_SRC
-        // });
-
-        let queue = world.resource::<RenderQueue>();
-        queue.submit([encoder.finish()]);
-
         // read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
         // read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
 
         let ms_render_target = world.resource::<MSRenderTarget>();
         if let Some(target_view) = &ms_render_target.view {
             let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
-                label: None,
+                label: Some("flow_field_render_pass"),
                 color_attachments: &[Some(RenderPassColorAttachment {
                     view: target_view,
                     resolve_target: Some(view_target.main_texture_view()),
@@ -134,8 +71,12 @@ impl ViewNode for FlowFieldRenderNode {
 
             pass.set_render_pipeline(&pipeline);
             pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
-            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            pass.set_index_buffer(index_buffer.slice(..), 0, IndexFormat::Uint32);
+            pass.set_vertex_buffer(0, compute_resources.vertex_buffer.slice(..));
+            pass.set_index_buffer(
+                compute_resources.index_buffer.slice(..),
+                0,
+                IndexFormat::Uint32,
+            );
 
             pass.draw_indexed(0..num_indices, 0, 0..1);
         }

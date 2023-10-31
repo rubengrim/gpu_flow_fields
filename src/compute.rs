@@ -196,7 +196,7 @@ impl FromWorld for FlowFieldComputeResources {
                 * globals.num_spawned_lines
                 * globals.max_iterations)
                 .into(),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            usage: BufferUsages::VERTEX | BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
@@ -207,7 +207,7 @@ impl FromWorld for FlowFieldComputeResources {
                 * globals.num_spawned_lines
                 * (globals.max_iterations - 1))
                 .into(),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+            usage: BufferUsages::INDEX | BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 

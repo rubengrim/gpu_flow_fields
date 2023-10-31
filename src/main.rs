@@ -205,11 +205,11 @@ pub struct FlowFieldGlobals {
 impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
-            num_spawned_lines: 1000,
-            max_iterations: 500,
+            num_spawned_lines: 20000,
+            max_iterations: 300,
             current_iteration: 0,
-            step_size: 1.0,
-            line_width: 2.0,
+            step_size: 5.0,
+            line_width: 1.0,
             viewport_width: 640.0,
             viewport_height: 480.0,
             grid_point_distance: 5.0,
