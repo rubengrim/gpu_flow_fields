@@ -1,58 +1,161 @@
 #import bevy_render::view  View
 
 struct Globals {
-    num_spawned_lines: u32,
-    max_iterations: u32,
-    current_iteration: u32,
-    step_size: f32,
-    line_width: f32,
+    should_reset: u32,
+    paused: u32,
+    // Does not update when resizing window
     viewport_width: f32,
     // Does not update when resizing window
     viewport_height: f32,
-    // Space between grid points when discretizing the flow field
-    grid_point_distance: f32,
-    grid_margin: f32,
+    num_lines: u32,
+    max_iterations: u32,
+    // Step size of particle per iteration in pixels
+    step_size: f32,
+    // Speed is in pixels per second
+    particle_speed: f32,
+    line_width: f32,
+    line_rgba: vec4<f32>,
+    // Snaps line angle if this is > 0. No snapping will happen if == 0.
+    // If = 10 the line angles will snap to multiples of (pi/2)/10.
+    num_angles_allowed: u32,
+    noise_scale: f32,
+    field_offset_x: f32,
+    field_offset_y: f32,
+}
+
+struct CurrentIterationCount {
+    value: u32,
 }
 
 @group(0) @binding(0) var<uniform> view: View;
 @group(0) @binding(1) var<uniform> globals: Globals;
-@group(0) @binding(2) var<storage, read_write> field_grid_buffer: array<f32>;
+@group(0) @binding(2) var<uniform> iteration_count: CurrentIterationCount;
 @group(0) @binding(3) var<storage, read_write> vertex_buffer: array<LineVertex>;
 @group(0) @binding(4) var<storage, read_write> index_buffer: array<u32>;
 
-@compute @workgroup_size(16, 16, 1)
-fn discretize_flow_field(@builtin(global_invocation_id) id: vec3<u32>) {
-    let grid_resolution_width =
-        u32((globals.viewport_width + 2.0 * globals.grid_margin) / globals.grid_point_distance);
-    let grid_resolution_height =
-        u32((globals.viewport_height + 2.0 * globals.grid_margin) / globals.grid_point_distance);
+struct LineVertex {
+    position: vec4<f32>,
+    color: vec4<f32>,
+}
 
-    if id.x >= grid_resolution_width || id.y >= grid_resolution_height {
+struct LineVertexPair {
+    first: LineVertex,
+    second: LineVertex,
+}
+
+fn create_vertices_for_line_joint(joint: vec2<f32>, field_direction: vec2<f32>, line_width: f32) -> LineVertexPair {
+    let line_normal = normalize(vec2<f32>(field_direction.y, -field_direction.x));
+    let p_1 = joint - line_normal * line_width / 2.0;
+    let p_2 = joint + line_normal * line_width / 2.0;
+    // let c = vec4<f32>(1.0, 1.0, 1.0, 0.1);
+    // let c = vec4<f32>(0.0, 0.0, 0.0, 0.2);
+    let c = globals.line_rgba;
+
+    return LineVertexPair(
+        LineVertex(vec4<f32>(p_1, 0.0, 0.0), c), 
+        LineVertex(vec4<f32>(p_2, 0.0, 0.0), c)
+    );
+}
+
+fn get_field_angle(pos: vec2<f32>) -> f32 {
+    let offset = vec2<f32>(globals.field_offset_x, globals.field_offset_y);
+    let noise = perlinNoise2((pos + offset) * globals.noise_scale);
+
+    if globals.num_angles_allowed > 0u {
+        let snapped_noise = round(noise * f32(globals.num_angles_allowed)) / f32(globals.num_angles_allowed);
+        let field_angle = 6.2832 * snapped_noise;
+        return field_angle;
+    }
+    else {
+        let field_angle = 6.2832 * noise;
+        return field_angle;        
+    }
+}
+
+fn get_field_direction(pos: vec2<f32>) -> vec2<f32> {
+    let field_angle = get_field_angle(pos);
+    let field_direction = normalize(vec2<f32>(cos(field_angle), sin(field_angle)));
+       
+    return field_direction;
+}
+
+// Create an initial line segment of 4 vertices.
+// Corresponds to two iterations.
+@compute @workgroup_size(16, 1, 1)
+fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
+    if invocation_id.x >= globals.num_lines {
         return;
     }
-    let origin_offset = vec2<f32>(-(globals.viewport_width * 0.5 + globals.grid_margin), -(globals.viewport_height * 0.5 + globals.grid_margin));
-    let world_position = vec2<f32>(f32(id.x) * globals.grid_point_distance, f32(id.y) * globals.grid_point_distance) + origin_offset; 
 
+    // Multiplying by two ensures there's room for exactly two unique seeds per invocation
+    let seed_1 = invocation_id.x * 2u; 
+    let seed_2 = seed_1 + 1u;
 
-    let noise_scale = 0.003;
-    let field_angle = 6.2832 * perlinNoise2(world_position * noise_scale);
+    // view.viewport is vec4<f32>(x_orig, y_orid, width, height)
+    let viewport_bottom_left = vec2<f32>(view.viewport.x - view.viewport.z / 2.0, view.viewport.y - view.viewport.w / 2.0);
+    let joint_1 = vec2<f32>(viewport_bottom_left.x + random_f32(seed_1) * view.viewport.z,  viewport_bottom_left.y + random_f32(seed_2) * view.viewport.w);
 
-    // var field_angle = 1.0;
-    // if world_position.x > 0.0 && world_position.y > 0.0 {
-    //     field_angle = 3.1415 * 0.25;
-    // }
-    // if world_position.x < 0.0 && world_position.y > 0.0 {
-    //     field_angle = 3.1415 * 0.75;
-    // }
-    // if world_position.x < 0.0 && world_position.y < 0.0 {
-    //     field_angle = 3.1415 * 1.25;
-    // }
-    // if world_position.x > 0.0 && world_position.y < 0.0 {
-    //     field_angle = 3.1415 * 1.75;
-    // }
+    let field_direction = get_field_direction(joint_1);
+    let joint_2 = vec2<f32>(joint_1.x + field_direction.x * globals.step_size, joint_1.y + field_direction.y * globals.step_size);
 
-    let grid_index = id.x + grid_resolution_width * id.y;
-    field_grid_buffer[grid_index] = field_angle;
+    // let joint_1 = vec2<f32>(100.0, 100.0);
+    // let joint_2 = vec2<f32>(150.0, 100.0);
+
+    let joint_1_vertices = create_vertices_for_line_joint(joint_1, field_direction, globals.line_width);
+    let joint_2_vertices = create_vertices_for_line_joint(joint_2, field_direction, globals.line_width);
+
+    let first_vertex_index = 2u * globals.max_iterations * invocation_id.x;
+    let first_triangle_index = 6u * (globals.max_iterations - 1u) * invocation_id.x;
+
+    vertex_buffer[first_vertex_index] = joint_1_vertices.first;
+    vertex_buffer[first_vertex_index+1u] = joint_1_vertices.second;
+    vertex_buffer[first_vertex_index+2u] = joint_2_vertices.first;
+    vertex_buffer[first_vertex_index+3u] = joint_2_vertices.second;
+    
+    index_buffer[first_triangle_index] = first_vertex_index;
+    index_buffer[first_triangle_index+1u] = first_vertex_index+1u;
+    index_buffer[first_triangle_index+2u] = first_vertex_index+3u;
+    index_buffer[first_triangle_index+3u] = first_vertex_index;
+    index_buffer[first_triangle_index+4u] = first_vertex_index+3u;
+    index_buffer[first_triangle_index+5u] = first_vertex_index+2u;
+
+    // Debug
+    // index_buffer[0] = u32(iteration_count.value);
+}
+
+@compute @workgroup_size(16, 1, 1)
+fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
+    if invocation_id.x >= globals.num_lines {
+        return;
+    }
+
+    let base_vertex_index = 2u * iteration_count.value + 2u * globals.max_iterations * invocation_id.x;
+    let base_triangle_index = 6u * (iteration_count.value - 1u) + 6u * (globals.max_iterations - 1u) * invocation_id.x;
+
+    // Vertex position for previous line joint
+    let prev_joint_v1_pos = vertex_buffer[base_vertex_index-u32(2)].position.xy;
+    let prev_joint_v2_pos = vertex_buffer[base_vertex_index-u32(1)].position.xy;
+
+    let prev_joint = prev_joint_v1_pos + 0.5 * (prev_joint_v2_pos - prev_joint_v1_pos);
+
+    let field_direction = get_field_direction(prev_joint);
+
+    let new_joint = vec2<f32>(prev_joint.x + field_direction.x * globals.step_size, prev_joint.y + field_direction.y * globals.step_size);
+    let new_joint_vertices = create_vertices_for_line_joint(new_joint, field_direction, globals.line_width);
+
+    vertex_buffer[base_vertex_index] = new_joint_vertices.first;
+    vertex_buffer[base_vertex_index+1u] = new_joint_vertices.second;
+    
+    index_buffer[base_triangle_index] = base_vertex_index-u32(2u);
+    index_buffer[base_triangle_index+1u] = base_vertex_index-u32(1u);
+    index_buffer[base_triangle_index+2u] = base_vertex_index+u32(1u);
+    index_buffer[base_triangle_index+3u] = base_vertex_index-u32(2u);
+    index_buffer[base_triangle_index+4u] = base_vertex_index+u32(1u);
+    index_buffer[base_triangle_index+5u] = base_vertex_index;
+
+    // Debug
+    // index_buffer[0] = u32(iteration_count.value);
+
 }
 
 // MIT License. © Stefan Gustavson, Munrocket
@@ -113,177 +216,3 @@ fn pcg_hash(input: u32) -> u32 {
     let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
     return (word >> 22u) ^ word;
 }
-
-struct LineVertex {
-    position: vec4<f32>,
-    color: vec4<f32>,
-}
-
-struct LineVertexPair {
-    first: LineVertex,
-    second: LineVertex,
-}
-
-fn create_debug_line_segment(first_vertex_index: u32, first_triangle_index: u32) {
-    let half_length_x = 50.0;
-    let half_length_y = 100.0;
-    let p_1 = vec2<f32>(-half_length_x, -half_length_y);
-    let p_2 = vec2<f32>(half_length_x, -half_length_y);
-    let p_3 = vec2<f32>(-half_length_x, half_length_y);
-    let p_4 = vec2<f32>(half_length_x, half_length_y);
-
-    let c_1 = vec3<f32>(1.0, 0.0, 0.0);
-    let c_2 = vec3<f32>(0.0, 1.0, 0.0);
-    let c_3 = vec3<f32>(0.0, 0.0, 1.0);
-    let c_4 = vec3<f32>(1.0, 1.0, 1.0);
-
-    vertex_buffer[first_vertex_index] = LineVertex(vec4<f32>(p_1, 0.0, 0.0), vec4<f32>(c_1, 0.0)); 
-    vertex_buffer[first_vertex_index+1u] = LineVertex(vec4<f32>(p_2, 0.0, 0.0), vec4<f32>(c_2, 0.0)); 
-    vertex_buffer[first_vertex_index+2u] = LineVertex(vec4<f32>(p_3, 0.0, 0.0), vec4<f32>(c_3, 0.0)); 
-    vertex_buffer[first_vertex_index+3u] = LineVertex(vec4<f32>(p_4, 0.0, 0.0), vec4<f32>(c_4, 0.0)); 
-
-    index_buffer[first_triangle_index] = first_vertex_index;
-    index_buffer[first_triangle_index+1u] = first_vertex_index+1u;
-    index_buffer[first_triangle_index+2u] = first_vertex_index+3u;
-    index_buffer[first_triangle_index+3u] = first_vertex_index;
-    index_buffer[first_triangle_index+4u] = first_vertex_index+3u;
-    index_buffer[first_triangle_index+5u] = first_vertex_index+2u;
-}
-
-fn create_vertices_for_line_joint(joint: vec2<f32>, field_direction: vec2<f32>, line_width: f32) -> LineVertexPair {
-    let line_normal = normalize(vec2<f32>(field_direction.y, -field_direction.x));
-    let p_1 = joint - line_normal * line_width / 2.0;
-    let p_2 = joint + line_normal * line_width / 2.0;
-    let c_1 = vec3<f32>(0.5, 0.5, 0.5);
-    let c_2 = vec3<f32>(0.5, 0.5, 0.5);
-
-    return LineVertexPair(
-        LineVertex(vec4<f32>(p_1, 0.0, 0.0), vec4<f32>(c_1, 1.0)), 
-        LineVertex(vec4<f32>(p_2, 0.0, 0.0), vec4<f32>(c_2, 1.0))
-    );
-}
-
-fn get_cached_field_direction(pos: vec2<f32>) -> vec2<f32> {
-    var pos_cpy = pos;
-    let max_abs_width = globals.viewport_width * 0.5 + globals.grid_margin;
-    let max_abs_height = globals.viewport_height * 0.5 + globals.grid_margin;
-
-    // Clamp to area where grid is defined
-    if pos_cpy.x < -max_abs_width {
-        pos_cpy.x = -max_abs_width;
-    }
-    else if pos_cpy.x > max_abs_width {
-        pos_cpy.x = max_abs_width;
-    }
-    if pos_cpy.y < -max_abs_height {
-        pos_cpy.y = -max_abs_height;
-    }
-    else if pos_cpy.y > max_abs_height {
-        pos_cpy.y = max_abs_height;
-    }
-
-    let grid_resolution_width =
-        u32((globals.viewport_width + 2.0 * globals.grid_margin) / globals.grid_point_distance);
-
-    let grid_space_x = u32(round((pos_cpy.x + max_abs_width) / globals.grid_point_distance));
-    let grid_space_y = u32(round((pos_cpy.y + max_abs_height) / globals.grid_point_distance));
-    let grid_index = grid_space_x + grid_resolution_width * grid_space_y;
-    let field_angle = field_grid_buffer[grid_index];
-    let field_direction = normalize(vec2<f32>(cos(field_angle), sin(field_angle)));
-    
-    return field_direction;
-}
-
-fn get_true_field_direction(pos: vec2<f32>) -> vec2<f32> {
-    let field_angle = 6.2832 * perlinNoise2(pos * 0.003);
-    let field_direction = normalize(vec2<f32>(cos(field_angle), sin(field_angle)));
-    
-    return field_direction;
-}
-
-// Create an initial line segment of 4 vertices.
-// Corresponds to two iterations.
-@compute @workgroup_size(16, 1, 1)
-fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
-    if invocation_id.x >= globals.num_spawned_lines {
-        return;
-    }
-
-    // Multiplying by two ensures there's room for exactly two unique seeds per invocation
-    let seed_1 = invocation_id.x * 2u; 
-    let seed_2 = seed_1 + 1u;
-
-    // view.viewport is vec4<f32>(x_orig, y_orid, width, height)
-    let viewport_bottom_left = vec2<f32>(view.viewport.x - view.viewport.z / 2.0, view.viewport.y - view.viewport.w / 2.0);
-    let joint_1 = vec2<f32>(viewport_bottom_left.x + random_f32(seed_1) * view.viewport.z,  viewport_bottom_left.y + random_f32(seed_2) * view.viewport.w);
-
-    // let field_direction = get_cached_field_direction(joint_1);
-    let field_direction = get_true_field_direction(joint_1);
-    let joint_2 = vec2<f32>(joint_1.x + field_direction.x * globals.step_size, joint_1.y + field_direction.y * globals.step_size);
-
-    // let joint_1 = vec2<f32>(100.0, 100.0);
-    // let joint_2 = vec2<f32>(150.0, 100.0);
-
-    let joint_1_vertices = create_vertices_for_line_joint(joint_1, field_direction, globals.line_width);
-    let joint_2_vertices = create_vertices_for_line_joint(joint_2, field_direction, globals.line_width);
-
-    let first_vertex_index = 2u * globals.max_iterations * invocation_id.x;
-    let first_triangle_index = 6u * (globals.max_iterations - 1u) * invocation_id.x;
-
-    vertex_buffer[first_vertex_index] = joint_1_vertices.first;
-    vertex_buffer[first_vertex_index+1u] = joint_1_vertices.second;
-    vertex_buffer[first_vertex_index+2u] = joint_2_vertices.first;
-    vertex_buffer[first_vertex_index+3u] = joint_2_vertices.second;
-    
-    index_buffer[first_triangle_index] = first_vertex_index;
-    index_buffer[first_triangle_index+1u] = first_vertex_index+1u;
-    index_buffer[first_triangle_index+2u] = first_vertex_index+3u;
-    index_buffer[first_triangle_index+3u] = first_vertex_index;
-    index_buffer[first_triangle_index+4u] = first_vertex_index+3u;
-    index_buffer[first_triangle_index+5u] = first_vertex_index+2u;
-}
-
-@compute @workgroup_size(16, 1, 1)
-fn update(@builtin(global_invocation_id) invocation_id: vec3<u32>) {
-    if invocation_id.x >= globals.num_spawned_lines {
-        return;
-    }
-
-    let base_vertex_index = 2u * globals.current_iteration + 2u * globals.max_iterations * invocation_id.x;
-    let base_triangle_index = 6u * (globals.current_iteration - 1u) + 6u * (globals.max_iterations - 1u) * invocation_id.x;
-
-    // Vertex position for previous line joint
-    let prev_joint_v1_pos = vertex_buffer[base_vertex_index-u32(2)].position.xy;
-    let prev_joint_v2_pos = vertex_buffer[base_vertex_index-u32(1)].position.xy;
-
-    let prev_joint = prev_joint_v1_pos + 0.5 * (prev_joint_v2_pos - prev_joint_v1_pos);
-
-    // let field_direction = get_cached_field_direction(prev_joint);
-    let field_direction = get_true_field_direction(prev_joint);
-
-    let new_joint = vec2<f32>(prev_joint.x + field_direction.x * globals.step_size, prev_joint.y + field_direction.y * globals.step_size);
-    let new_joint_vertices = create_vertices_for_line_joint(new_joint, field_direction, globals.line_width);
-
-
-    vertex_buffer[base_vertex_index] = new_joint_vertices.first;
-    vertex_buffer[base_vertex_index+1u] = new_joint_vertices.second;
-    
-    index_buffer[base_triangle_index] = base_vertex_index-u32(2u);
-    index_buffer[base_triangle_index+1u] = base_vertex_index-u32(1u);
-    index_buffer[base_triangle_index+2u] = base_vertex_index+u32(1u);
-    index_buffer[base_triangle_index+3u] = base_vertex_index-u32(2u);
-    index_buffer[base_triangle_index+4u] = base_vertex_index+u32(1u);
-    index_buffer[base_triangle_index+5u] = base_vertex_index;
-
-    // let d = globals.current_iteration;
-    // index_buffer[base_triangle_index] = d;
-    // index_buffer[base_triangle_index+1u] = d;
-    // index_buffer[base_triangle_index+2u] = d;
-    // index_buffer[base_triangle_index+3u] = d;
-    // index_buffer[base_triangle_index+4u] = d;
-    // index_buffer[base_triangle_index+5u] = d;
-
-    // Debug
-    // index_buffer[0] = u32(globals.current_iteration);
-}
-

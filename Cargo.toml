@@ -11,3 +11,4 @@ bevy = { version = "0.11.3", features = ["dynamic_linking"] }
 # bevy = { version = "0.11.3"}
 wgpu = "0.16.0"
 bytemuck = { version = "1.12", features = [ "derive" ]}
+bevy_egui = "0.22.0"

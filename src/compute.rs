@@ -10,6 +10,11 @@ use bevy::{
 };
 use std::{borrow::Cow, mem::size_of};
 
+#[derive(Resource, Default, ShaderType, Clone, Copy)]
+pub struct CurrentIterationCount {
+    pub value: u32,
+}
+
 #[derive(Resource, Default)]
 pub enum FlowFieldComputeState {
     #[default]
@@ -21,43 +26,53 @@ pub enum FlowFieldComputeState {
 
 pub struct FlowFieldComputeNode;
 
-// TODO: Refactor. State machine is a mess
 impl ViewNode for FlowFieldComputeNode {
     type ViewQuery = &'static ViewUniformOffset;
 
     fn update(&mut self, world: &mut World) {
-        // let mut state = world.resource_mut::<FlowFieldComputeState>();
+        if !world.resource::<ShouldUpdateFlowField>().0 {
+            return;
+        }
         world.resource_scope(|world, mut state: Mut<FlowFieldComputeState>| {
             world.resource_scope(|world, mut globals: Mut<FlowFieldGlobals>| {
-                let compute_resources = world.resource::<FlowFieldComputeResources>();
-                let pipeline_cache = world.resource::<PipelineCache>();
+                world.resource_scope(|world, mut iteration_count: Mut<CurrentIterationCount>| {
+                    // info!("On iteration {}", globals.current_iteration);
+                    if globals.should_reset == 1 {
+                        *state = FlowFieldComputeState::Loading;
+                        iteration_count.value = 0;
+                    }
 
-                match *state {
-                    FlowFieldComputeState::Loading => {
-                        if let (CachedPipelineState::Ok(_), CachedPipelineState::Ok(_)) = (
-                            pipeline_cache
-                                .get_compute_pipeline_state(compute_resources.init_pipeline_id),
-                            pipeline_cache
-                                .get_compute_pipeline_state(compute_resources.update_pipeline_id),
-                        ) {
-                            // Init performs the equivalent of 2 iterations.
-                            globals.current_iteration = 2;
-                            *state = FlowFieldComputeState::Initializing;
+                    let compute_resources = world.resource::<FlowFieldComputeResources>();
+                    let pipeline_cache = world.resource::<PipelineCache>();
+
+                    match *state {
+                        FlowFieldComputeState::Loading => {
+                            if let (CachedPipelineState::Ok(_), CachedPipelineState::Ok(_)) = (
+                                pipeline_cache
+                                    .get_compute_pipeline_state(compute_resources.init_pipeline_id),
+                                pipeline_cache.get_compute_pipeline_state(
+                                    compute_resources.update_pipeline_id,
+                                ),
+                            ) {
+                                // Init performs the equivalent of 2 iterations.
+                                iteration_count.value = 2;
+                                *state = FlowFieldComputeState::Initializing;
+                            }
                         }
-                    }
-                    FlowFieldComputeState::Initializing => {
-                        globals.current_iteration += 1;
-                        *state = FlowFieldComputeState::Updating;
-                    }
-                    FlowFieldComputeState::Updating => {
-                        if globals.current_iteration >= globals.max_iterations {
-                            *state = FlowFieldComputeState::Finished;
-                        } else {
-                            globals.current_iteration += 1;
+                        FlowFieldComputeState::Initializing => {
+                            iteration_count.value += 1;
+                            *state = FlowFieldComputeState::Updating;
                         }
-                    }
-                    FlowFieldComputeState::Finished => {}
-                };
+                        FlowFieldComputeState::Updating => {
+                            if iteration_count.value >= globals.max_iterations {
+                                *state = FlowFieldComputeState::Finished;
+                            } else {
+                                iteration_count.value += 1;
+                            }
+                        }
+                        FlowFieldComputeState::Finished => {}
+                    };
+                });
             });
         });
     }
@@ -69,10 +84,13 @@ impl ViewNode for FlowFieldComputeNode {
         view_uniform_offset: QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        if !world.resource::<ShouldUpdateFlowField>().0 {
+            return Ok(());
+        }
+
         let compute_resources = world.resource::<FlowFieldComputeResources>();
         let globals = world.resource::<FlowFieldGlobals>();
         let state = world.resource::<FlowFieldComputeState>();
-        // info!("Current iteration: {}", globals.current_iteration);
         let bind_group = match world.resource::<FlowFieldComputeBindGroup>().0.clone() {
             Some(val) => val,
             None => return Ok(()),
@@ -84,11 +102,9 @@ impl ViewNode for FlowFieldComputeNode {
                 return Ok(());
             }
             FlowFieldComputeState::Initializing => {
-                if let (Some(init_pipeline), Some(discretization_pipeline)) = (
-                    pipeline_cache.get_compute_pipeline(compute_resources.init_pipeline_id),
-                    pipeline_cache
-                        .get_compute_pipeline(compute_resources.discretization_pipeline_id),
-                ) {
+                if let Some(init_pipeline) =
+                    pipeline_cache.get_compute_pipeline(compute_resources.init_pipeline_id)
+                {
                     let command_encoder = render_context.command_encoder();
                     let mut pass = command_encoder.begin_compute_pass(&ComputePassDescriptor {
                         label: Some("flow_field_compute_pass"),
@@ -96,24 +112,10 @@ impl ViewNode for FlowFieldComputeNode {
 
                     pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
 
-                    let grid_resolution_width = (globals.viewport_width
-                        + 2.0 * globals.grid_margin)
-                        / globals.grid_point_distance;
-                    let grid_resolution_height = (globals.viewport_height
-                        + 2.0 * globals.grid_margin)
-                        / globals.grid_point_distance;
-                    // Compute grid
-                    pass.set_pipeline(&discretization_pipeline);
-                    let num_workgroups_x =
-                        (grid_resolution_width as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
-                    let num_workgroups_y =
-                        (grid_resolution_height as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
-                    pass.dispatch_workgroups(num_workgroups_x, num_workgroups_y, 1);
-
                     // Init lines
                     pass.set_pipeline(&init_pipeline);
                     let num_workgroups =
-                        (globals.num_spawned_lines as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
+                        (globals.num_lines as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
                     pass.dispatch_workgroups(num_workgroups, 1, 1);
                 } else {
                     return Ok(());
@@ -131,7 +133,7 @@ impl ViewNode for FlowFieldComputeNode {
                     pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
                     pass.set_pipeline(&update_pipeline);
                     let num_workgroups =
-                        (globals.num_spawned_lines as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
+                        (globals.num_lines as f32 / WORK_GROUP_SIZE as f32).ceil() as u32;
                     pass.dispatch_workgroups(num_workgroups, 1, 1);
                 }
             }
@@ -142,7 +144,7 @@ impl ViewNode for FlowFieldComputeNode {
 
         let device = world.resource::<RenderDevice>();
         let queue = world.resource::<RenderQueue>();
-        // read_buffer_u32(&compute_resources.index_buffer, device, queue);
+        // read_buffer_u32(&index_buffer, device, queue);
         // read_buffer_f32(&compute_resources.field_grid_buffer, device, queue);
 
         Ok(())
@@ -156,60 +158,63 @@ impl FromWorld for FlowFieldComputeNode {
 }
 
 #[derive(Resource)]
-pub struct FlowFieldComputeResources {
-    pub discretization_pipeline_id: CachedComputePipelineId,
-    pub init_pipeline_id: CachedComputePipelineId,
-    pub update_pipeline_id: CachedComputePipelineId,
-    pub bind_group_layout: BindGroupLayout,
-    pub globals_buffer: UniformBuffer<FlowFieldGlobals>,
-    pub field_grid_buffer: Buffer,
-    pub vertex_buffer: Buffer,
-    pub index_buffer: Buffer,
+pub struct FlowFieldLineMeshBuffers {
+    pub vertex_buffer: Option<Buffer>,
+    pub index_buffer: Option<Buffer>,
 }
 
-impl FromWorld for FlowFieldComputeResources {
-    fn from_world(world: &mut World) -> Self {
-        let globals = world.resource::<FlowFieldGlobals>();
-        // let window_size = world.resource::<WindowSize>();
-        let render_device = world.resource::<RenderDevice>();
-        let render_queue = world.resource::<RenderQueue>();
-        let pipeline_cache = world.resource::<PipelineCache>();
+impl Default for FlowFieldLineMeshBuffers {
+    fn default() -> Self {
+        Self {
+            vertex_buffer: None,
+            index_buffer: None,
+        }
+    }
+}
 
-        let globals_buffer = globals.to_buffer(render_device, render_queue);
-
-        let grid_resolution_width = ((globals.viewport_width + 2.0 * globals.grid_margin)
-            / globals.grid_point_distance) as u64;
-        let grid_resolution_height = ((globals.viewport_height + 2.0 * globals.grid_margin)
-            / globals.grid_point_distance) as u64;
-
-        let field_grid_buffer = render_device.create_buffer(&BufferDescriptor {
-            label: Some("field_grid_buffer"),
-            size: size_of::<f32>() as u64 * grid_resolution_width * grid_resolution_height,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
-
-        let vertex_buffer = render_device.create_buffer(&BufferDescriptor {
+pub fn create_line_mesh_buffers(
+    mut mesh_data: ResMut<FlowFieldLineMeshBuffers>,
+    globals: Res<FlowFieldGlobals>,
+    device: Res<RenderDevice>,
+) {
+    if mesh_data.vertex_buffer.is_none()
+        || mesh_data.index_buffer.is_none()
+        || globals.should_reset == 1
+    {
+        let vertex_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("compute_vertex_buffer"),
-            size: (size_of::<f32>() as u32
-                * 16
-                * globals.num_spawned_lines
-                * globals.max_iterations)
+            size: (size_of::<f32>() as u32 * 16 * globals.num_lines * globals.max_iterations)
                 .into(),
             usage: BufferUsages::VERTEX | BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
-        let index_buffer = render_device.create_buffer(&BufferDescriptor {
+        let index_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("compute_index_buffer"),
-            size: (size_of::<u32>() as u32
-                * 6
-                * globals.num_spawned_lines
-                * (globals.max_iterations - 1))
+            size: (size_of::<u32>() as u32 * 6 * globals.num_lines * (globals.max_iterations - 1))
                 .into(),
             usage: BufferUsages::INDEX | BufferUsages::STORAGE | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+
+        mesh_data.vertex_buffer = Some(vertex_buffer);
+        mesh_data.index_buffer = Some(index_buffer);
+    }
+}
+
+#[derive(Resource)]
+pub struct FlowFieldComputeResources {
+    pub init_pipeline_id: CachedComputePipelineId,
+    pub update_pipeline_id: CachedComputePipelineId,
+    pub bind_group_layout: BindGroupLayout,
+}
+
+impl FromWorld for FlowFieldComputeResources {
+    fn from_world(world: &mut World) -> Self {
+        // let window_size = world.resource::<WindowSize>();
+        let render_device = world.resource::<RenderDevice>();
+        let render_queue = world.resource::<RenderQueue>();
+        let pipeline_cache = world.resource::<PipelineCache>();
 
         let bind_group_layout =
             render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -237,12 +242,12 @@ impl FromWorld for FlowFieldComputeResources {
                         },
                         count: None,
                     },
-                    // Field buffer
+                    // Iteration count
                     BindGroupLayoutEntry {
                         binding: 2,
                         visibility: ShaderStages::COMPUTE,
                         ty: BindingType::Buffer {
-                            ty: BufferBindingType::Storage { read_only: false },
+                            ty: BufferBindingType::Uniform,
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -273,16 +278,6 @@ impl FromWorld for FlowFieldComputeResources {
                 ],
             });
 
-        let discretization_pipeline_id =
-            pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-                label: Some(Cow::from("flow_field_discretization_pipeline")),
-                layout: vec![bind_group_layout.clone()],
-                push_constant_ranges: vec![],
-                shader: FLOW_FIELD_COMPUTE_SHADER.typed(),
-                shader_defs: vec![],
-                entry_point: Cow::from("discretize_flow_field"),
-            });
-
         let init_pipeline_id = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(Cow::from("flow_field_init_pipeline")),
             layout: vec![bind_group_layout.clone()],
@@ -302,14 +297,9 @@ impl FromWorld for FlowFieldComputeResources {
         });
 
         Self {
-            discretization_pipeline_id,
             init_pipeline_id,
             update_pipeline_id,
             bind_group_layout,
-            globals_buffer,
-            field_grid_buffer,
-            vertex_buffer,
-            index_buffer,
         }
     }
 }
@@ -322,12 +312,21 @@ pub fn queue_compute_bind_group(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     compute_resources: Res<FlowFieldComputeResources>,
+    mesh_buffers: Res<FlowFieldLineMeshBuffers>,
     view_uniforms: Res<ViewUniforms>,
-    mut globals: ResMut<FlowFieldGlobals>,
+    globals: Res<FlowFieldGlobals>,
+    iteration_count: Res<CurrentIterationCount>,
 ) {
-    let globals_buffer = globals.to_buffer(&*render_device, &*render_queue);
+    // let globals_buffer = globals.to_buffer(&*render_device, &*render_queue);
+    let globals_buffer = struct_to_buffer(*globals, &*render_device, &*render_queue);
+    let iteration_buffer = struct_to_buffer(*iteration_count, &*render_device, &*render_queue);
+    // info!("{}", iteration_count.value);
 
-    if let Some(view_uniforms) = view_uniforms.uniforms.binding() {
+    if let (Some(view_uniforms), Some(vertex_buffer), Some(index_buffer)) = (
+        view_uniforms.uniforms.binding(),
+        mesh_buffers.vertex_buffer.clone(),
+        mesh_buffers.index_buffer.clone(),
+    ) {
         let entries = &[
             BindGroupEntry {
                 binding: 0,
@@ -339,15 +338,15 @@ pub fn queue_compute_bind_group(
             },
             BindGroupEntry {
                 binding: 2,
-                resource: compute_resources.field_grid_buffer.as_entire_binding(),
+                resource: iteration_buffer.binding().unwrap(),
             },
             BindGroupEntry {
                 binding: 3,
-                resource: compute_resources.vertex_buffer.as_entire_binding(),
+                resource: vertex_buffer.as_entire_binding(),
             },
             BindGroupEntry {
                 binding: 4,
-                resource: compute_resources.index_buffer.as_entire_binding(),
+                resource: index_buffer.as_entire_binding(),
             },
         ];
 

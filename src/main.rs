@@ -17,8 +17,10 @@ use bevy::{
         view::ColorGrading,
         Render, RenderApp, RenderSet,
     },
+    time::Stopwatch,
     window::{WindowResized, WindowResolution},
 };
+use bevy_egui::{egui, EguiContexts, EguiPlugin};
 
 mod compute;
 mod render;
@@ -73,7 +75,20 @@ impl Plugin for FlowFieldPlugin {
             Shader::from_wgsl
         );
 
-        // let window = app.world.query::<&Window>().single(&app.world);
+        app.add_plugins(EguiPlugin).add_systems(Update, update_ui);
+
+        app.insert_resource(FlowFieldStopwatch(Stopwatch::new()))
+            .init_resource::<ShouldUpdateFlowField>()
+            .add_plugins(ExtractResourcePlugin::<ShouldUpdateFlowField>::default())
+            .add_systems(Update, update_flow_field_stopwatch);
+
+        let window = app.world.query::<&Window>().single(&app.world);
+        app.insert_resource(FlowFieldGlobals {
+            viewport_width: window.resolution.width(),
+            viewport_height: window.resolution.height(),
+            ..default()
+        })
+        .add_plugins(ExtractResourcePlugin::<FlowFieldGlobals>::default());
 
         // app.sub_app_mut(RenderApp).insert_resource(WindowSize {
         //     width: width as u32,
@@ -91,28 +106,26 @@ impl Plugin for FlowFieldPlugin {
     }
 
     fn finish(&self, app: &mut App) {
-        let window = app.world.query::<&Window>().single(&app.world);
-        let width = window.resolution.width();
-        let height = window.resolution.height();
-
         let render_app = app.sub_app_mut(RenderApp);
         render_app
-            .insert_resource(FlowFieldGlobals {
-                viewport_width: width,
-                viewport_height: height,
-                ..default()
-            })
             .init_resource::<FlowFieldComputeState>()
+            .init_resource::<CurrentIterationCount>()
+            .init_resource::<FlowFieldLineMeshBuffers>()
             .init_resource::<FlowFieldComputeResources>()
             .init_resource::<FlowFieldComputeBindGroup>()
             .init_resource::<MSRenderTarget>()
             .init_resource::<FlowFieldRenderResources>()
             .init_resource::<FlowFieldRenderBindGroup>();
 
-        render_app.add_systems(
-            Render,
-            (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
-        );
+        render_app
+            .add_systems(
+                Render,
+                (create_ms_render_target, create_line_mesh_buffers).in_set(RenderSet::Prepare),
+            )
+            .add_systems(
+                Render,
+                (queue_compute_bind_group, queue_render_bind_group).in_set(RenderSet::Queue),
+            );
 
         render_app
             .add_render_graph_node::<ViewNodeRunner<FlowFieldComputeNode>>(
@@ -133,6 +146,12 @@ impl Plugin for FlowFieldPlugin {
             ],
         );
     }
+}
+
+pub fn update_ui(mut contexts: EguiContexts) {
+    egui::Window::new("Hello").show(contexts.ctx_mut(), |ui| {
+        ui.label("world");
+    });
 }
 
 #[derive(Resource, Clone, ExtractResource)]
@@ -187,33 +206,49 @@ impl Default for FlowFieldCameraBundle {
 
 #[derive(Resource, ExtractResource, ShaderType, Clone, Copy)]
 pub struct FlowFieldGlobals {
-    pub num_spawned_lines: u32,
-    // Needs to be > 2
-    pub max_iterations: u32,
-    pub current_iteration: u32,
-    pub step_size: f32,
-    pub line_width: f32,
+    // The flow field state will reset if set to 1
+    pub should_reset: u32,
+    pub paused: u32,
     // Does not update when resizing window
     pub viewport_width: f32,
     // Does not update when resizing window
     pub viewport_height: f32,
-    // Space between grid points when discretizing the flow field
-    pub grid_point_distance: f32,
-    pub grid_margin: f32,
+    pub num_lines: u32,
+    // Needs to be > 2 because the init stage does 2 iterations
+    pub max_iterations: u32,
+    // Step size of particles per iteration in pixels
+    pub step_size: f32,
+    // Upper bound on particle speed in pixels per second. May still go slower depending on framerate.
+    // step_size takes priority over particle speed
+    pub max_particle_speed: f32,
+    pub line_width: f32,
+    pub line_rgba: Vec4,
+    // Snaps line angle if this is > 0.
+    // If == 10 the line angles will snap to multiples of (pi/2)/10.
+    // If == 0 no snapping will be done.
+    pub num_angles_allowed: u32,
+    pub noise_scale: f32,
+    pub field_offset_x: f32,
+    pub field_offset_y: f32,
 }
 
 impl Default for FlowFieldGlobals {
     fn default() -> Self {
         Self {
-            num_spawned_lines: 20000,
-            max_iterations: 300,
-            current_iteration: 0,
-            step_size: 5.0,
-            line_width: 1.0,
+            should_reset: 0,
+            paused: 0,
             viewport_width: 640.0,
             viewport_height: 480.0,
-            grid_point_distance: 5.0,
-            grid_margin: 100.0,
+            num_lines: 20000,
+            max_iterations: 300,
+            step_size: 1.0,
+            max_particle_speed: 200.0,
+            line_width: 1.0,
+            line_rgba: Vec4::new(0.1, 1.0, 0.2, 0.1),
+            num_angles_allowed: 0,
+            noise_scale: 0.005,
+            field_offset_x: 0.0,
+            field_offset_y: 0.0,
         }
     }
 }
@@ -228,5 +263,27 @@ impl FlowFieldGlobals {
         buffer.set_label(Some("flow_field_globals"));
         buffer.write_buffer(render_device, render_queue);
         buffer
+    }
+}
+
+#[derive(Resource, Clone, ExtractResource, Default)]
+pub struct ShouldUpdateFlowField(pub bool);
+
+#[derive(Resource, Clone, ExtractResource, Default)]
+pub struct FlowFieldStopwatch(pub Stopwatch);
+
+pub fn update_flow_field_stopwatch(
+    time: Res<Time>,
+    mut stopwatch: ResMut<FlowFieldStopwatch>,
+    mut should_update: ResMut<ShouldUpdateFlowField>,
+    globals: Res<FlowFieldGlobals>,
+) {
+    let time_step = globals.step_size / globals.max_particle_speed;
+    if stopwatch.0.elapsed_secs() >= time_step {
+        stopwatch.0.reset();
+        should_update.0 = true;
+    } else {
+        stopwatch.0.tick(time.delta());
+        should_update.0 = false;
     }
 }

@@ -1,5 +1,8 @@
 use bevy::render::{
-    render_resource::{Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor},
+    render_resource::{
+        encase::internal::WriteInto, Buffer, BufferDescriptor, BufferUsages,
+        CommandEncoderDescriptor, ShaderType, UniformBuffer,
+    },
     renderer::{RenderDevice, RenderQueue},
 };
 
@@ -63,4 +66,15 @@ pub fn read_buffer_u32(buffer: &Buffer, device: &RenderDevice, queue: &RenderQue
                 .collect::<Vec<_>>();
             println!("Output: {readback:?}");
         });
+}
+
+pub fn struct_to_buffer<T: ShaderType + WriteInto>(
+    s: T,
+    render_device: &RenderDevice,
+    render_queue: &RenderQueue,
+) -> UniformBuffer<T> {
+    let mut buffer = UniformBuffer::from(s);
+    buffer.set_label(Some("flow_field_globals"));
+    buffer.write_buffer(render_device, render_queue);
+    buffer
 }

@@ -17,8 +17,9 @@ use wgpu::{
 };
 
 use crate::{
-    compute::FlowFieldComputeResources, utilities::*, FlowFieldGlobals, WindowSize,
-    FLOW_FIELD_RENDER_SHADER,
+    compute::{FlowFieldComputeResources, FlowFieldLineMeshBuffers},
+    utilities::*,
+    FlowFieldGlobals, WindowSize, FLOW_FIELD_RENDER_SHADER,
 };
 
 pub struct FlowFieldRenderNode;
@@ -36,7 +37,7 @@ impl ViewNode for FlowFieldRenderNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let globals = world.resource::<FlowFieldGlobals>();
-        let compute_resources = world.resource::<FlowFieldComputeResources>();
+        let mesh_buffers = world.resource::<FlowFieldLineMeshBuffers>();
         let render_resources = world.resource::<FlowFieldRenderResources>();
         let bind_group = world.resource::<FlowFieldRenderBindGroup>();
 
@@ -48,18 +49,29 @@ impl ViewNode for FlowFieldRenderNode {
             return Ok(());
         };
 
-        // read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
-        // read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
-
         let ms_render_target = world.resource::<MSRenderTarget>();
-        if let Some(target_view) = &ms_render_target.view {
+        if let (Some(target_view), Some(vertex_buffer), Some(index_buffer)) = (
+            &ms_render_target.view,
+            mesh_buffers.vertex_buffer.clone(),
+            mesh_buffers.index_buffer.clone(),
+        ) {
+            // FOR DEBUG
+            // let queue = world.resource::<RenderQueue>();
+            // read_buffer_f32(&vertex_buffer, render_context.render_device(), &queue);
+            // read_buffer_u32(&index_buffer, render_context.render_device(), &queue);
+
             let mut pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
                 label: Some("flow_field_render_pass"),
                 color_attachments: &[Some(RenderPassColorAttachment {
                     view: target_view,
                     resolve_target: Some(view_target.main_texture_view()),
                     ops: Operations {
-                        load: LoadOp::Clear(wgpu::Color::WHITE),
+                        load: LoadOp::Clear(wgpu::Color {
+                            r: 1.0,
+                            g: 1.0,
+                            b: 1.0,
+                            a: 1.0,
+                        }),
                         store: true,
                     },
                 })],
@@ -67,17 +79,12 @@ impl ViewNode for FlowFieldRenderNode {
             });
 
             // let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 1);
-            let num_indices = 6 * globals.num_spawned_lines * (globals.max_iterations - 1);
+            let num_indices = 6 * globals.num_lines * (globals.max_iterations - 1);
 
             pass.set_render_pipeline(&pipeline);
             pass.set_bind_group(0, &bind_group, &[view_uniform_offset.offset]);
-            pass.set_vertex_buffer(0, compute_resources.vertex_buffer.slice(..));
-            pass.set_index_buffer(
-                compute_resources.index_buffer.slice(..),
-                0,
-                IndexFormat::Uint32,
-            );
-
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.set_index_buffer(index_buffer.slice(..), 0, IndexFormat::Uint32);
             pass.draw_indexed(0..num_indices, 0, 0..1);
         }
 
@@ -97,45 +104,91 @@ pub struct MSRenderTarget {
     pub view: Option<TextureView>,
 }
 
-impl FromWorld for MSRenderTarget {
-    fn from_world(world: &mut World) -> Self {
-        let device = world.resource::<RenderDevice>();
-        let globals = world.resource::<FlowFieldGlobals>();
-
-        let ms_texture = device.create_texture(&TextureDescriptor {
-            label: None,
-            size: Extent3d {
-                width: globals.viewport_width as u32,
-                height: globals.viewport_height as u32,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 8,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::COPY_SRC
-                | TextureUsages::TEXTURE_BINDING
-                | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[TextureFormat::Rgba8UnormSrgb],
-        });
-
-        let ms_view = ms_texture.create_view(&TextureViewDescriptor {
-            label: None,
-            format: Some(TextureFormat::Rgba8UnormSrgb),
-            dimension: Some(TextureViewDimension::D2),
-            aspect: TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
-        });
-
+impl Default for MSRenderTarget {
+    fn default() -> Self {
         Self {
-            texture: Some(ms_texture),
-            view: Some(ms_view),
+            texture: None,
+            view: None,
         }
     }
 }
+
+pub fn create_ms_render_target(
+    device: Res<RenderDevice>,
+    globals: Res<FlowFieldGlobals>,
+    mut ms_render_target: ResMut<MSRenderTarget>,
+) {
+    let ms_texture = device.create_texture(&TextureDescriptor {
+        label: None,
+        size: Extent3d {
+            width: globals.viewport_width as u32,
+            height: globals.viewport_height as u32,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 8,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8UnormSrgb,
+        usage: TextureUsages::COPY_SRC
+            | TextureUsages::TEXTURE_BINDING
+            | TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[TextureFormat::Rgba8UnormSrgb],
+    });
+
+    let ms_view = ms_texture.create_view(&TextureViewDescriptor {
+        label: None,
+        format: Some(TextureFormat::Rgba8UnormSrgb),
+        dimension: Some(TextureViewDimension::D2),
+        aspect: TextureAspect::All,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: None,
+    });
+
+    ms_render_target.texture = Some(ms_texture);
+    ms_render_target.view = Some(ms_view);
+}
+
+// impl FromWorld for MSRenderTarget {
+//     fn from_world(world: &mut World) -> Self {
+//         let device = world.resource::<RenderDevice>();
+//         let globals = world.resource::<FlowFieldGlobals>();
+
+//         let ms_texture = device.create_texture(&TextureDescriptor {
+//             label: None,
+//             size: Extent3d {
+//                 width: globals.viewport_width as u32,
+//                 height: globals.viewport_height as u32,
+//                 depth_or_array_layers: 1,
+//             },
+//             mip_level_count: 1,
+//             sample_count: 8,
+//             dimension: TextureDimension::D2,
+//             format: TextureFormat::Rgba8UnormSrgb,
+//             usage: TextureUsages::COPY_SRC
+//                 | TextureUsages::TEXTURE_BINDING
+//                 | TextureUsages::RENDER_ATTACHMENT,
+//             view_formats: &[TextureFormat::Rgba8UnormSrgb],
+//         });
+
+//         let ms_view = ms_texture.create_view(&TextureViewDescriptor {
+//             label: None,
+//             format: Some(TextureFormat::Rgba8UnormSrgb),
+//             dimension: Some(TextureViewDimension::D2),
+//             aspect: TextureAspect::All,
+//             base_mip_level: 0,
+//             mip_level_count: None,
+//             base_array_layer: 0,
+//             array_layer_count: None,
+//         });
+
+//         Self {
+//             texture: Some(ms_texture),
+//             view: Some(ms_view),
+//         }
+//     }
+// }
 
 #[derive(Resource)]
 pub struct FlowFieldRenderResources {
@@ -230,7 +283,7 @@ impl FromWorld for FlowFieldRenderResources {
                 entry_point: Cow::from("fragment"),
                 targets: vec![Some(ColorTargetState {
                     format: TextureFormat::Rgba8UnormSrgb,
-                    blend: None,
+                    blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
