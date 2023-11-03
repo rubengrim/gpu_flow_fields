@@ -91,9 +91,10 @@ fn init(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
     let seed_1 = invocation_id.x * 2u; 
     let seed_2 = seed_1 + 1u;
 
-    // view.viewport is vec4<f32>(x_orig, y_orid, width, height)
-    let viewport_bottom_left = vec2<f32>(view.viewport.x - view.viewport.z / 2.0, view.viewport.y - view.viewport.w / 2.0);
-    let joint_1 = vec2<f32>(viewport_bottom_left.x + random_f32(seed_1) * view.viewport.z,  viewport_bottom_left.y + random_f32(seed_2) * view.viewport.w);
+    // view.viewport is vec4<f32>(x_orig, y_orig, width, height)
+    let padding = 100.0;
+    let viewport_bottom_left = vec2<f32>(view.viewport.x - (view.viewport.z + padding) / 2.0, view.viewport.y - (view.viewport.w + padding) / 2.0);
+    let joint_1 = vec2<f32>(viewport_bottom_left.x + random_f32(seed_1) * (view.viewport.z + padding),  viewport_bottom_left.y + random_f32(seed_2) * (view.viewport.w + padding));
 
     let field_direction = get_field_direction(joint_1);
     let joint_2 = vec2<f32>(joint_1.x + field_direction.x * globals.step_size, joint_1.y + field_direction.y * globals.step_size);

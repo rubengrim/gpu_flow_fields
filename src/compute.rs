@@ -30,16 +30,17 @@ impl ViewNode for FlowFieldComputeNode {
     type ViewQuery = &'static ViewUniformOffset;
 
     fn update(&mut self, world: &mut World) {
-        if !world.resource::<ShouldUpdateFlowField>().0 {
-            return;
-        }
         world.resource_scope(|world, mut state: Mut<FlowFieldComputeState>| {
             world.resource_scope(|world, mut globals: Mut<FlowFieldGlobals>| {
                 world.resource_scope(|world, mut iteration_count: Mut<CurrentIterationCount>| {
-                    // info!("On iteration {}", globals.current_iteration);
                     if globals.should_reset == 1 {
+                        info!("Detected reset in compute node");
                         *state = FlowFieldComputeState::Loading;
                         iteration_count.value = 0;
+                    }
+
+                    if !world.resource::<ShouldUpdateFlowField>().0 {
+                        return;
                     }
 
                     let compute_resources = world.resource::<FlowFieldComputeResources>();
@@ -213,7 +214,6 @@ impl FromWorld for FlowFieldComputeResources {
     fn from_world(world: &mut World) -> Self {
         // let window_size = world.resource::<WindowSize>();
         let render_device = world.resource::<RenderDevice>();
-        let render_queue = world.resource::<RenderQueue>();
         let pipeline_cache = world.resource::<PipelineCache>();
 
         let bind_group_layout =

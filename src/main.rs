@@ -42,8 +42,8 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            LogDiagnosticsPlugin::default(),
-            FrameTimeDiagnosticsPlugin::default(),
+            // LogDiagnosticsPlugin::default(),
+            // FrameTimeDiagnosticsPlugin::default(),
             FlowFieldPlugin,
         ))
         .add_systems(Startup, setup)
@@ -148,9 +148,121 @@ impl Plugin for FlowFieldPlugin {
     }
 }
 
-pub fn update_ui(mut contexts: EguiContexts) {
-    egui::Window::new("Hello").show(contexts.ctx_mut(), |ui| {
-        ui.label("world");
+pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobals>) {
+    egui::Window::new("Settings").show(contexts.ctx_mut(), |ui| {
+        let mut settings_updated = false;
+
+        ui.horizontal(|ui| {
+            ui.label("Number of lines");
+            if ui
+                .add(egui::DragValue::new(&mut globals.num_lines).speed(1.0))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Number of iterations");
+            if ui
+                .add(egui::DragValue::new(&mut globals.max_iterations).speed(1.0))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Iteration step size (px)");
+            if ui
+                .add(egui::DragValue::new(&mut globals.step_size).speed(0.1))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Max speed");
+            if ui
+                .add(egui::DragValue::new(&mut globals.max_particle_speed).speed(0.1))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Line width");
+            if ui
+                .add(egui::DragValue::new(&mut globals.line_width).speed(0.1))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        let mut rgba_array = [
+            globals.line_rgba.x,
+            globals.line_rgba.y,
+            globals.line_rgba.z,
+            globals.line_rgba.w,
+        ];
+        ui.horizontal(|ui| {
+            ui.label("Line color");
+            if ui
+                .color_edit_button_rgba_premultiplied(&mut rgba_array)
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+        globals.line_rgba = Vec4::from_array(rgba_array);
+
+        ui.horizontal(|ui| {
+            ui.label("Number of angles");
+            if ui
+                .add(egui::DragValue::new(&mut globals.num_angles_allowed).speed(1.0))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Noise scale");
+            if ui
+                .add(egui::DragValue::new(&mut globals.noise_scale).speed(0.0005))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Field offset");
+            ui.label("X:");
+            if ui
+                .add(egui::DragValue::new(&mut globals.field_offset_y).speed(1.0))
+                .changed()
+            {
+                settings_updated = true;
+            }
+
+            ui.label("Y:");
+            if ui
+                .add(egui::DragValue::new(&mut globals.field_offset_x).speed(1.0))
+                .changed()
+            {
+                settings_updated = true;
+            }
+        });
+
+        if settings_updated {
+            globals.should_reset = 1;
+        } else {
+            globals.should_reset = 0;
+        }
     });
 }
 
@@ -240,12 +352,12 @@ impl Default for FlowFieldGlobals {
             viewport_width: 640.0,
             viewport_height: 480.0,
             num_lines: 20000,
-            max_iterations: 300,
+            max_iterations: 200,
             step_size: 1.0,
-            max_particle_speed: 200.0,
+            max_particle_speed: 40.0,
             line_width: 1.0,
-            line_rgba: Vec4::new(0.1, 1.0, 0.2, 0.1),
-            num_angles_allowed: 0,
+            line_rgba: Vec4::new(0.0, 0.0, 0.0, 0.1),
+            num_angles_allowed: 15,
             noise_scale: 0.005,
             field_offset_x: 0.0,
             field_offset_y: 0.0,
