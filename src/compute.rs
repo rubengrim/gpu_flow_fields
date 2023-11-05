@@ -31,49 +31,47 @@ impl ViewNode for FlowFieldComputeNode {
 
     fn update(&mut self, world: &mut World) {
         world.resource_scope(|world, mut state: Mut<FlowFieldComputeState>| {
-            world.resource_scope(|world, mut globals: Mut<FlowFieldGlobals>| {
-                world.resource_scope(|world, mut iteration_count: Mut<CurrentIterationCount>| {
-                    if globals.should_reset == 1 {
-                        info!("Detected reset in compute node");
-                        *state = FlowFieldComputeState::Loading;
-                        iteration_count.value = 0;
-                    }
+            world.resource_scope(|world, mut iteration_count: Mut<CurrentIterationCount>| {
+                let globals = world.resource::<FlowFieldGlobals>();
 
-                    if !world.resource::<ShouldUpdateFlowField>().0 {
-                        return;
-                    }
+                if globals.should_reset == 1 {
+                    *state = FlowFieldComputeState::Loading;
+                    iteration_count.value = 0;
+                }
 
-                    let compute_resources = world.resource::<FlowFieldComputeResources>();
-                    let pipeline_cache = world.resource::<PipelineCache>();
+                if !world.resource::<ShouldUpdateFlowField>().0 {
+                    return;
+                }
 
-                    match *state {
-                        FlowFieldComputeState::Loading => {
-                            if let (CachedPipelineState::Ok(_), CachedPipelineState::Ok(_)) = (
-                                pipeline_cache
-                                    .get_compute_pipeline_state(compute_resources.init_pipeline_id),
-                                pipeline_cache.get_compute_pipeline_state(
-                                    compute_resources.update_pipeline_id,
-                                ),
-                            ) {
-                                // Init performs the equivalent of 2 iterations.
-                                iteration_count.value = 2;
-                                *state = FlowFieldComputeState::Initializing;
-                            }
+                let compute_resources = world.resource::<FlowFieldComputeResources>();
+                let pipeline_cache = world.resource::<PipelineCache>();
+
+                match *state {
+                    FlowFieldComputeState::Loading => {
+                        if let (CachedPipelineState::Ok(_), CachedPipelineState::Ok(_)) = (
+                            pipeline_cache
+                                .get_compute_pipeline_state(compute_resources.init_pipeline_id),
+                            pipeline_cache
+                                .get_compute_pipeline_state(compute_resources.update_pipeline_id),
+                        ) {
+                            // Init performs the equivalent of 2 iterations.
+                            iteration_count.value = 2;
+                            *state = FlowFieldComputeState::Initializing;
                         }
-                        FlowFieldComputeState::Initializing => {
+                    }
+                    FlowFieldComputeState::Initializing => {
+                        iteration_count.value += 1;
+                        *state = FlowFieldComputeState::Updating;
+                    }
+                    FlowFieldComputeState::Updating => {
+                        if iteration_count.value >= globals.max_iterations {
+                            *state = FlowFieldComputeState::Finished;
+                        } else {
                             iteration_count.value += 1;
-                            *state = FlowFieldComputeState::Updating;
                         }
-                        FlowFieldComputeState::Updating => {
-                            if iteration_count.value >= globals.max_iterations {
-                                *state = FlowFieldComputeState::Finished;
-                            } else {
-                                iteration_count.value += 1;
-                            }
-                        }
-                        FlowFieldComputeState::Finished => {}
-                    };
-                });
+                    }
+                    FlowFieldComputeState::Finished => {}
+                };
             });
         });
     }

@@ -18,6 +18,7 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
     time::Stopwatch,
+    utils::tracing::Instrument,
     window::{WindowResized, WindowResolution},
 };
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
@@ -90,6 +91,8 @@ impl Plugin for FlowFieldPlugin {
         })
         .add_plugins(ExtractResourcePlugin::<FlowFieldGlobals>::default());
 
+        app.add_systems(Update, on_window_resize);
+
         // app.sub_app_mut(RenderApp).insert_resource(WindowSize {
         //     width: width as u32,
         //     height: height as u32,
@@ -150,25 +153,33 @@ impl Plugin for FlowFieldPlugin {
 
 pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobals>) {
     egui::Window::new("Settings").show(contexts.ctx_mut(), |ui| {
-        let mut settings_updated = false;
+        let mut should_reset = false;
 
         ui.horizontal(|ui| {
             ui.label("Number of lines");
             if ui
-                .add(egui::DragValue::new(&mut globals.num_lines).speed(1.0))
+                .add(
+                    egui::DragValue::new(&mut globals.num_lines)
+                        .speed(1.0)
+                        .clamp_range(1..=100000),
+                )
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
         ui.horizontal(|ui| {
             ui.label("Number of iterations");
             if ui
-                .add(egui::DragValue::new(&mut globals.max_iterations).speed(1.0))
+                .add(
+                    egui::DragValue::new(&mut globals.max_iterations)
+                        .speed(1.0)
+                        .clamp_range(2..=1000),
+                )
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
@@ -178,7 +189,7 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
                 .add(egui::DragValue::new(&mut globals.step_size).speed(0.1))
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
@@ -188,7 +199,7 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
                 .add(egui::DragValue::new(&mut globals.max_particle_speed).speed(0.1))
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
@@ -198,7 +209,7 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
                 .add(egui::DragValue::new(&mut globals.line_width).speed(0.1))
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
@@ -214,7 +225,7 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
                 .color_edit_button_rgba_premultiplied(&mut rgba_array)
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
         globals.line_rgba = Vec4::from_array(rgba_array);
@@ -225,40 +236,56 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
                 .add(egui::DragValue::new(&mut globals.num_angles_allowed).speed(1.0))
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
         ui.horizontal(|ui| {
             ui.label("Noise scale");
             if ui
-                .add(egui::DragValue::new(&mut globals.noise_scale).speed(0.0005))
+                .add(egui::DragValue::new(&mut globals.noise_scale).speed(0.0001))
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
         ui.horizontal(|ui| {
             ui.label("Field offset");
-            ui.label("X:");
             if ui
-                .add(egui::DragValue::new(&mut globals.field_offset_y).speed(1.0))
+                .add(
+                    egui::DragValue::new(&mut globals.field_offset_y)
+                        .speed(1.0)
+                        .prefix("x:"),
+                )
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
 
-            ui.label("Y:");
             if ui
-                .add(egui::DragValue::new(&mut globals.field_offset_x).speed(1.0))
+                .add(
+                    egui::DragValue::new(&mut globals.field_offset_x)
+                        .speed(1.0)
+                        .prefix("y:"),
+                )
                 .changed()
             {
-                settings_updated = true;
+                should_reset = true;
             }
         });
 
-        if settings_updated {
+        ui.horizontal(|ui| {
+            if ui.button("Reset").clicked() {
+                should_reset = true;
+            }
+            let mut paused_bool = globals.paused == 1;
+            ui.checkbox(&mut paused_bool, "Paused");
+            globals.paused = if paused_bool { 1 } else { 0 };
+            // globals.paused = 1;
+        });
+
+        if should_reset {
             globals.should_reset = 1;
         } else {
             globals.should_reset = 0;
@@ -275,14 +302,13 @@ pub struct WindowSize {
 }
 
 pub fn on_window_resize(
-    mut window_size: ResMut<WindowSize>,
+    mut globals: ResMut<FlowFieldGlobals>,
     mut resize_event_reader: EventReader<WindowResized>,
 ) {
-    window_size.resized = false;
     for e in resize_event_reader.iter() {
-        window_size.width = e.width as u32;
-        window_size.height = e.height as u32;
-        window_size.resized = true;
+        globals.viewport_width = e.width;
+        globals.viewport_height = e.height;
+        globals.should_reset = 1;
     }
 }
 
@@ -321,9 +347,7 @@ pub struct FlowFieldGlobals {
     // The flow field state will reset if set to 1
     pub should_reset: u32,
     pub paused: u32,
-    // Does not update when resizing window
     pub viewport_width: f32,
-    // Does not update when resizing window
     pub viewport_height: f32,
     pub num_lines: u32,
     // Needs to be > 2 because the init stage does 2 iterations
@@ -365,19 +389,6 @@ impl Default for FlowFieldGlobals {
     }
 }
 
-impl FlowFieldGlobals {
-    fn to_buffer(
-        &self,
-        render_device: &RenderDevice,
-        render_queue: &RenderQueue,
-    ) -> UniformBuffer<FlowFieldGlobals> {
-        let mut buffer = UniformBuffer::from(*self);
-        buffer.set_label(Some("flow_field_globals"));
-        buffer.write_buffer(render_device, render_queue);
-        buffer
-    }
-}
-
 #[derive(Resource, Clone, ExtractResource, Default)]
 pub struct ShouldUpdateFlowField(pub bool);
 
@@ -391,7 +402,7 @@ pub fn update_flow_field_stopwatch(
     globals: Res<FlowFieldGlobals>,
 ) {
     let time_step = globals.step_size / globals.max_particle_speed;
-    if stopwatch.0.elapsed_secs() >= time_step {
+    if globals.paused == 0 && stopwatch.0.elapsed_secs() >= time_step {
         stopwatch.0.reset();
         should_update.0 = true;
     } else {

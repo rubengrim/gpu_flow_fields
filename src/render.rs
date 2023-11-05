@@ -118,77 +118,42 @@ pub fn create_ms_render_target(
     globals: Res<FlowFieldGlobals>,
     mut ms_render_target: ResMut<MSRenderTarget>,
 ) {
-    let ms_texture = device.create_texture(&TextureDescriptor {
-        label: None,
-        size: Extent3d {
-            width: globals.viewport_width as u32,
-            height: globals.viewport_height as u32,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 8,
-        dimension: TextureDimension::D2,
-        format: TextureFormat::Rgba8UnormSrgb,
-        usage: TextureUsages::COPY_SRC
-            | TextureUsages::TEXTURE_BINDING
-            | TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[TextureFormat::Rgba8UnormSrgb],
-    });
+    if ms_render_target.texture.is_none()
+        || ms_render_target.view.is_none()
+        || globals.should_reset == 1
+    {
+        let ms_texture = device.create_texture(&TextureDescriptor {
+            label: None,
+            size: Extent3d {
+                width: globals.viewport_width as u32,
+                height: globals.viewport_height as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 8,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::COPY_SRC
+                | TextureUsages::TEXTURE_BINDING
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[TextureFormat::Rgba8UnormSrgb],
+        });
 
-    let ms_view = ms_texture.create_view(&TextureViewDescriptor {
-        label: None,
-        format: Some(TextureFormat::Rgba8UnormSrgb),
-        dimension: Some(TextureViewDimension::D2),
-        aspect: TextureAspect::All,
-        base_mip_level: 0,
-        mip_level_count: None,
-        base_array_layer: 0,
-        array_layer_count: None,
-    });
+        let ms_view = ms_texture.create_view(&TextureViewDescriptor {
+            label: None,
+            format: Some(TextureFormat::Rgba8UnormSrgb),
+            dimension: Some(TextureViewDimension::D2),
+            aspect: TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        });
 
-    ms_render_target.texture = Some(ms_texture);
-    ms_render_target.view = Some(ms_view);
+        ms_render_target.texture = Some(ms_texture);
+        ms_render_target.view = Some(ms_view);
+    }
 }
-
-// impl FromWorld for MSRenderTarget {
-//     fn from_world(world: &mut World) -> Self {
-//         let device = world.resource::<RenderDevice>();
-//         let globals = world.resource::<FlowFieldGlobals>();
-
-//         let ms_texture = device.create_texture(&TextureDescriptor {
-//             label: None,
-//             size: Extent3d {
-//                 width: globals.viewport_width as u32,
-//                 height: globals.viewport_height as u32,
-//                 depth_or_array_layers: 1,
-//             },
-//             mip_level_count: 1,
-//             sample_count: 8,
-//             dimension: TextureDimension::D2,
-//             format: TextureFormat::Rgba8UnormSrgb,
-//             usage: TextureUsages::COPY_SRC
-//                 | TextureUsages::TEXTURE_BINDING
-//                 | TextureUsages::RENDER_ATTACHMENT,
-//             view_formats: &[TextureFormat::Rgba8UnormSrgb],
-//         });
-
-//         let ms_view = ms_texture.create_view(&TextureViewDescriptor {
-//             label: None,
-//             format: Some(TextureFormat::Rgba8UnormSrgb),
-//             dimension: Some(TextureViewDimension::D2),
-//             aspect: TextureAspect::All,
-//             base_mip_level: 0,
-//             mip_level_count: None,
-//             base_array_layer: 0,
-//             array_layer_count: None,
-//         });
-
-//         Self {
-//             texture: Some(ms_texture),
-//             view: Some(ms_view),
-//         }
-//     }
-// }
 
 #[derive(Resource)]
 pub struct FlowFieldRenderResources {
@@ -305,7 +270,7 @@ pub fn queue_render_bind_group(
     render_queue: Res<RenderQueue>,
     render_resources: Res<FlowFieldRenderResources>,
     view_uniforms: Res<ViewUniforms>,
-    settings: Res<FlowFieldGlobals>,
+    globals: Res<FlowFieldGlobals>,
 ) {
     if let Some(view_uniforms) = view_uniforms.uniforms.binding() {
         let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
@@ -318,8 +283,7 @@ pub fn queue_render_bind_group(
                 },
                 BindGroupEntry {
                     binding: 1,
-                    resource: settings
-                        .to_buffer(&render_device, &render_queue)
+                    resource: struct_to_buffer(*globals, &render_device, &render_queue)
                         .binding()
                         .unwrap(),
                 },
