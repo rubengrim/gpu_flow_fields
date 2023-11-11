@@ -14,10 +14,14 @@ struct Globals {
     // Speed is in pixels per second
     particle_speed: f32,
     line_width: f32,
-    line_rgba: vec4<f32>,
+    line_color_start: vec4<f32>,
+    line_color_end: vec4<f32>,
+    background_color: vec4<f32>,
     // Snaps line angle if this is > 0. No snapping will happen if == 0.
     // If = 10 the line angles will snap to multiples of (pi/2)/10.
     num_angles_allowed: u32,
+    angle_modulation_frequency: f32,
+    angle_modulation_strength: f32,
     noise_scale: f32,
     field_offset_x: f32,
     field_offset_y: f32,
@@ -47,9 +51,9 @@ fn create_vertices_for_line_joint(joint: vec2<f32>, field_direction: vec2<f32>, 
     let line_normal = normalize(vec2<f32>(field_direction.y, -field_direction.x));
     let p_1 = joint - line_normal * line_width / 2.0;
     let p_2 = joint + line_normal * line_width / 2.0;
-    // let c = vec4<f32>(1.0, 1.0, 1.0, 0.1);
-    // let c = vec4<f32>(0.0, 0.0, 0.0, 0.2);
-    let c = globals.line_rgba;
+
+    let f = f32(iteration_count.value) / f32(globals.max_iterations);
+    let c = globals.line_color_start * (1.0 - f) + globals.line_color_end * f;
 
     return LineVertexPair(
         LineVertex(vec4<f32>(p_1, 0.0, 0.0), c), 
@@ -60,14 +64,14 @@ fn create_vertices_for_line_joint(joint: vec2<f32>, field_direction: vec2<f32>, 
 fn get_field_angle(pos: vec2<f32>) -> f32 {
     let offset = vec2<f32>(globals.field_offset_x, globals.field_offset_y);
     let noise = perlinNoise2((pos + offset) * globals.noise_scale);
+    let field_angle = 6.2832 * noise + 3.1415 * globals.angle_modulation_strength* sin(f32(iteration_count.value) * globals.angle_modulation_frequency);
 
     if globals.num_angles_allowed > 0u {
-        let snapped_noise = round(noise * f32(globals.num_angles_allowed)) / f32(globals.num_angles_allowed);
-        let field_angle = 6.2832 * snapped_noise;
-        return field_angle;
+        let angle_multiple = 6.2832 / f32(globals.num_angles_allowed);
+        let n = round(field_angle / angle_multiple);
+        return n * angle_multiple;
     }
     else {
-        let field_angle = 6.2832 * noise;
         return field_angle;        
     }
 }

@@ -37,6 +37,7 @@ impl ViewNode for FlowFieldRenderNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let globals = world.resource::<FlowFieldGlobals>();
+
         let mesh_buffers = world.resource::<FlowFieldLineMeshBuffers>();
         let render_resources = world.resource::<FlowFieldRenderResources>();
         let bind_group = world.resource::<FlowFieldRenderBindGroup>();
@@ -67,10 +68,10 @@ impl ViewNode for FlowFieldRenderNode {
                     resolve_target: Some(view_target.main_texture_view()),
                     ops: Operations {
                         load: LoadOp::Clear(wgpu::Color {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
-                            a: 1.0,
+                            r: globals.background_color.x as f64,
+                            g: globals.background_color.y as f64,
+                            b: globals.background_color.z as f64,
+                            a: globals.background_color.w as f64,
                         }),
                         store: true,
                     },
@@ -78,7 +79,6 @@ impl ViewNode for FlowFieldRenderNode {
                 depth_stencil_attachment: None,
             });
 
-            // let num_indices = 6 * globals.num_spawned_lines * (globals.current_iteration - 1);
             let num_indices = 6 * globals.num_lines * (globals.max_iterations - 1);
 
             pass.set_render_pipeline(&pipeline);

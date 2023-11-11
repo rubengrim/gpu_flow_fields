@@ -52,10 +52,6 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
-    // commands.spawn(Camera2dBundle {
-    //     camera_render_graph: CameraRenderGraph::new(FLOW_FIELD_RENDER_GRAPH),
-    //     ..default()
-    // });
     commands.spawn((Camera2dBundle::default(),));
 }
 
@@ -175,7 +171,7 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
                 .add(
                     egui::DragValue::new(&mut globals.max_iterations)
                         .speed(1.0)
-                        .clamp_range(2..=1000),
+                        .clamp_range(2..=2000),
                 )
                 .changed()
             {
@@ -184,19 +180,9 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
         });
 
         ui.horizontal(|ui| {
-            ui.label("Iteration step size (px)");
+            ui.label("Iteration step size");
             if ui
-                .add(egui::DragValue::new(&mut globals.step_size).speed(0.1))
-                .changed()
-            {
-                should_reset = true;
-            }
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("Max speed");
-            if ui
-                .add(egui::DragValue::new(&mut globals.max_particle_speed).speed(0.1))
+                .add(egui::DragValue::new(&mut globals.step_size).speed(0.1).clamp_range(0..=1000)).on_hover_text("The distance (in pixels) every line is extended per iteration")
                 .changed()
             {
                 should_reset = true;
@@ -213,22 +199,49 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
             }
         });
 
-        let mut rgba_array = [
-            globals.line_rgba.x,
-            globals.line_rgba.y,
-            globals.line_rgba.z,
-            globals.line_rgba.w,
+        let mut rgba_start = [
+            globals.line_color_start.x,
+            globals.line_color_start.y,
+            globals.line_color_start.z,
+            globals.line_color_start.w,
+        ];
+        let mut rgba_end = [
+            globals.line_color_end.x,
+            globals.line_color_end.y,
+            globals.line_color_end.z,
+            globals.line_color_end.w,
         ];
         ui.horizontal(|ui| {
-            ui.label("Line color");
+            ui.label("Color start ");
             if ui
-                .color_edit_button_rgba_premultiplied(&mut rgba_array)
+                .color_edit_button_rgba_premultiplied(&mut rgba_start)
+                .changed()
+            {
+                should_reset = true;
+            }
+            ui.label("Color end ");
+            if ui
+                .color_edit_button_rgba_premultiplied(&mut rgba_end)
                 .changed()
             {
                 should_reset = true;
             }
         });
-        globals.line_rgba = Vec4::from_array(rgba_array);
+        globals.line_color_start = Vec4::from_array(rgba_start);
+        globals.line_color_end = Vec4::from_array(rgba_end);
+
+        let mut rgba_background = [
+            globals.background_color.x,
+            globals.background_color.y,
+            globals.background_color.z,
+            globals.background_color.w,
+        ];
+        ui.horizontal(|ui| {
+            ui.label("Background color");
+            ui.color_edit_button_rgba_premultiplied(&mut rgba_background)
+                .changed();
+        });
+        globals.background_color = Vec4::from_array(rgba_background);
 
         ui.horizontal(|ui| {
             ui.label("Number of angles");
@@ -241,9 +254,42 @@ pub fn update_ui(mut contexts: EguiContexts, mut globals: ResMut<FlowFieldGlobal
         });
 
         ui.horizontal(|ui| {
+            ui.label("Sine modulation frequency").on_hover_text(
+                "The frequency of the sine wave by which the flow field direction is modulated",
+            );
+            if ui
+                .add(egui::DragValue::new(&mut globals.angle_modulation_frequency).speed(0.001).clamp_range(0..=10))
+                .on_hover_text(
+                    "The frequency of the sine wave by which the flow field direction is being modulated",
+                )
+                .changed()
+            {
+                should_reset = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Sine modulation strength").on_hover_text("The strength of the sine wave modulation done to the flow field direction.");
+            if ui
+                .add(
+                    egui::DragValue::new(&mut globals.angle_modulation_strength)
+                        .speed(0.001)
+                        .clamp_range(0.0..=1.0),
+                ).on_hover_text("The strength of the sine wave modulation done to the flow field direction.")
+                .changed()
+            {
+                should_reset = true;
+            }
+        });
+
+        ui.horizontal(|ui| {
             ui.label("Noise scale");
             if ui
-                .add(egui::DragValue::new(&mut globals.noise_scale).speed(0.0001))
+                .add(
+                    egui::DragValue::new(&mut globals.noise_scale)
+                        .speed(0.00005)
+                        .clamp_range(0.0..=1.0),
+                )
                 .changed()
             {
                 should_reset = true;
@@ -358,11 +404,15 @@ pub struct FlowFieldGlobals {
     // step_size takes priority over particle speed
     pub max_particle_speed: f32,
     pub line_width: f32,
-    pub line_rgba: Vec4,
+    pub line_color_start: Vec4,
+    pub line_color_end: Vec4,
+    pub background_color: Vec4,
     // Snaps line angle if this is > 0.
     // If == 10 the line angles will snap to multiples of (pi/2)/10.
     // If == 0 no snapping will be done.
     pub num_angles_allowed: u32,
+    pub angle_modulation_frequency: f32,
+    pub angle_modulation_strength: f32,
     pub noise_scale: f32,
     pub field_offset_x: f32,
     pub field_offset_y: f32,
@@ -375,13 +425,17 @@ impl Default for FlowFieldGlobals {
             paused: 0,
             viewport_width: 640.0,
             viewport_height: 480.0,
-            num_lines: 20000,
-            max_iterations: 200,
+            num_lines: 40000,
+            max_iterations: 300,
             step_size: 1.0,
-            max_particle_speed: 40.0,
+            max_particle_speed: 30.0,
             line_width: 1.0,
-            line_rgba: Vec4::new(0.0, 0.0, 0.0, 0.1),
-            num_angles_allowed: 15,
+            line_color_start: Vec4::new(0.0, 0.0, 0.0, 0.1),
+            line_color_end: Vec4::new(0.0, 0.0, 0.0, 0.1),
+            background_color: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            num_angles_allowed: 0,
+            angle_modulation_frequency: 0.1,
+            angle_modulation_strength: 0.0,
             noise_scale: 0.005,
             field_offset_x: 0.0,
             field_offset_y: 0.0,
